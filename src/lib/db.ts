@@ -1,5 +1,6 @@
 import { Project, Payment, Contact, CloudDocument, DbData } from '../types';
 import { isSupabaseConfigured, supabase } from './supabase';
+import { ContactRow, DocumentRow, PaymentRow, ProjectRow } from './supabaseRows';
 
 const INITIAL_PROJECTS: Project[] = [
   {
@@ -254,7 +255,7 @@ export async function getDbData(): Promise<DbData> {
     }
 
     const data: DbData = {
-      projects: (projectsResult.data || []).map((row: any) => ({
+      projects: ((projectsResult.data || []) as ProjectRow[]).map((row) => ({
         id: row.id,
         name: row.name,
         description: row.description || '',
@@ -264,7 +265,7 @@ export async function getDbData(): Promise<DbData> {
         address: row.address || undefined,
         createdAt: row.created_at,
       })),
-      payments: (paymentsResult.data || []).map((row: any) => ({
+      payments: ((paymentsResult.data || []) as PaymentRow[]).map((row) => ({
         id: row.id,
         projectId: row.project_id,
         type: row.type,
@@ -276,7 +277,7 @@ export async function getDbData(): Promise<DbData> {
         date: row.payment_date,
         billPhoto: row.bill_photo || undefined,
       })),
-      contacts: (contactsResult.data || []).map((row: any) => ({
+      contacts: ((contactsResult.data || []) as ContactRow[]).map((row) => ({
         id: row.id,
         name: row.name,
         role: row.role,
@@ -286,7 +287,7 @@ export async function getDbData(): Promise<DbData> {
         gstNumber: row.gst_number || undefined,
         address: row.address || undefined,
       })),
-      documents: (documentsResult.data || []).map((row: any) => ({
+      documents: ((documentsResult.data || []) as DocumentRow[]).map((row) => ({
         id: row.id,
         projectId: row.project_id,
         name: row.name,
@@ -352,7 +353,7 @@ function missingIds<T extends { id: string }>(previousRows: T[], nextRows: T[]) 
   return previousRows.map((row) => row.id).filter((id) => !nextIds.has(id));
 }
 
-function toProjectRow(project: Project, userId: string) {
+function toProjectRow(project: Project, userId: string): ProjectRow {
   return {
     id: project.id,
     user_id: userId,
@@ -366,7 +367,7 @@ function toProjectRow(project: Project, userId: string) {
   };
 }
 
-function toContactRow(contact: Contact, userId: string) {
+function toContactRow(contact: Contact, userId: string): ContactRow {
   return {
     id: contact.id,
     user_id: userId,
@@ -380,7 +381,7 @@ function toContactRow(contact: Contact, userId: string) {
   };
 }
 
-function toPaymentRow(payment: Payment, userId: string) {
+function toPaymentRow(payment: Payment, userId: string): PaymentRow {
   return {
     id: payment.id,
     user_id: userId,
@@ -396,7 +397,7 @@ function toPaymentRow(payment: Payment, userId: string) {
   };
 }
 
-function toDocumentRow(document: CloudDocument, userId: string) {
+function toDocumentRow(document: CloudDocument, userId: string): DocumentRow {
   return {
     id: document.id,
     user_id: userId,

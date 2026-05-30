@@ -12,9 +12,13 @@ const SETTINGS_KEYS = [
   'cc_bank_account_type',
   'cc_bank_ifsc',
   'custom_logo_base64',
+  'custom_logo_storage_path',
   'custom_stamp_base64',
+  'custom_stamp_storage_path',
   'custom_stamp_sign_base64',
+  'custom_stamp_sign_storage_path',
   'custom_sign_base64',
+  'custom_sign_storage_path',
   'cc_storage_type',
   'cc_storage_local_prefix',
   'cc_storage_cloud_endpoint',
@@ -27,6 +31,13 @@ const SETTINGS_KEYS = [
 
 const STAFF_SALARIES_KEY = 'cc_staff_salaries';
 const SYNCABLE_KEYS = new Set([...SETTINGS_KEYS, STAFF_SALARIES_KEY]);
+const STORAGE_BUCKET = 'catalyser-documents';
+const ASSET_KEYS = [
+  { dataKey: 'custom_logo_base64', pathKey: 'custom_logo_storage_path' },
+  { dataKey: 'custom_stamp_base64', pathKey: 'custom_stamp_storage_path' },
+  { dataKey: 'custom_stamp_sign_base64', pathKey: 'custom_stamp_sign_storage_path' },
+  { dataKey: 'custom_sign_base64', pathKey: 'custom_sign_storage_path' },
+];
 
 let persistenceInstalled = false;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -52,6 +63,80 @@ function writeNullableLocalValue(key: string, value: unknown) {
   }
 
   localStorage.setItem(key, String(value));
+}
+
+function extensionForContentType(contentType: string) {
+  if (contentType.includes('jpeg')) return 'jpg';
+  if (contentType.includes('webp')) return 'webp';
+  if (contentType.includes('svg')) return 'svg';
+  return 'png';
+}
+
+async function uploadDataUrlAsset(userId: string, key: string, dataUrl: string) {
+  if (!supabase || !dataUrl.startsWith('data:')) return null;
+
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  const extension = extensionForContentType(blob.type || 'image/png');
+  const path = `${userId}/settings/${key}.${extension}`;
+  const uploadResult = await supabase.storage.from(STORAGE_BUCKET).upload(path, blob, {
+    upsert: true,
+    contentType: blob.type || 'image/png',
+  });
+
+  if (uploadResult.error) {
+    throw uploadResult.error;
+  }
+
+  return path;
+}
+
+async function createSignedAssetUrl(path: string) {
+  if (!supabase) return null;
+  const result = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(path, 60 * 60);
+  if (result.error) {
+    throw result.error;
+  }
+  return result.data.signedUrl;
+}
+
+async function hydrateAssetUrls(settings: Record<string, unknown>) {
+  for (const asset of ASSET_KEYS) {
+    const storagePath = settings[asset.pathKey];
+    if (typeof storagePath === 'string' && storagePath) {
+      try {
+        const signedUrl = await createSignedAssetUrl(storagePath);
+        if (signedUrl) {
+          localStorage.setItem(asset.dataKey, signedUrl);
+          localStorage.setItem(asset.pathKey, storagePath);
+        }
+      } catch (error) {
+        console.error('Supabase signed asset URL failed:', error);
+      }
+    }
+  }
+}
+
+async function migrateLocalAssetsToStorage(userId: string, settings: Record<string, string | null>) {
+  for (const asset of ASSET_KEYS) {
+    const value = settings[asset.dataKey];
+    if (!value?.startsWith('data:')) continue;
+
+    try {
+      const path = await uploadDataUrlAsset(userId, asset.dataKey, value);
+      if (!path) continue;
+
+      const signedUrl = await createSignedAssetUrl(path);
+      settings[asset.pathKey] = path;
+      settings[asset.dataKey] = null;
+      localStorage.setItem(asset.pathKey, path);
+      if (signedUrl) {
+        localStorage.setItem(asset.dataKey, signedUrl);
+      }
+    } catch (error) {
+      console.error('Supabase asset upload failed:', error);
+    }
+  }
 }
 
 export async function hydrateSettingsFromSupabase() {
@@ -82,6 +167,7 @@ export async function hydrateSettingsFromSupabase() {
       writeNullableLocalValue(key, settings[key]);
     }
   });
+  await hydrateAssetUrls(settings);
 
   if (salariesResult.data?.salaries) {
     localStorage.setItem(STAFF_SALARIES_KEY, JSON.stringify(salariesResult.data.salaries));
@@ -106,6 +192,7 @@ export async function persistSettingsToSupabase() {
     acc[key] = localStorage.getItem(key);
     return acc;
   }, {});
+  await migrateLocalAssetsToStorage(user.id, settings);
 
   const salaries = readJsonValue(STAFF_SALARIES_KEY, []);
 
