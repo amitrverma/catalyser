@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Project, Payment, Contact, CloudDocument, PaymentType, PaymentMode } from '../types';
+import { Project, Payment, Contact, CloudDocument, PaymentType, PaymentMode, DocumentCategory } from '../types';
 import { formatDate } from '../lib/formatter';
 import InvoiceGenerator from './InvoiceGenerator';
 import DocumentManager from './DocumentManager';
@@ -17,8 +17,9 @@ interface ProjectDetailProps {
   onDeletePayment: (paymentId: string) => void;
   onEditPayment?: (payment: Payment) => void;
   onAddContact: (name: string, role: 'client' | 'vendor' | 'supplier', phone: string, email: string, company: string) => void;
-  onAddDocument: (name: string, category: any, size: number, fileType: string) => void;
+  onAddDocument: (file: File, category: DocumentCategory) => void;
   onDeleteDocument: (docId: string) => void;
+  onDownloadDocument: (doc: CloudDocument) => void;
 }
 
 export default function ProjectDetail({
@@ -34,8 +35,9 @@ export default function ProjectDetail({
   onAddContact,
   onAddDocument,
   onDeleteDocument,
+  onDownloadDocument,
 }: ProjectDetailProps) {
-  const [activeTab, setActiveTab] = useState<'ledger' | 'invoice' | 'parties' | 'contacts'>('ledger');
+  const [activeTab, setActiveTab] = useState<'ledger' | 'invoice' | 'parties' | 'documents' | 'contacts'>('ledger');
   
   // States for Adding dynamic transaction ledger record
   const [showAddPayment, setShowAddPayment] = useState(false);
@@ -242,6 +244,7 @@ export default function ProjectDetail({
             { id: 'ledger', label: 'transaction', count: projectPayments.length },
             { id: 'invoice', label: 'Billing Invoices', count: null },
             { id: 'parties', label: 'Parties', count: null },
+            { id: 'documents', label: 'Documents', count: documents.filter((doc) => doc.projectId === project.id).length },
             { id: 'contacts', label: 'Directory Contacts', count: null },
           ].map((tab) => (
             <button
@@ -774,6 +777,16 @@ export default function ProjectDetail({
             onAddContact={onAddContact}
             payments={payments}
             projects={projects}
+          />
+        )}
+
+        {activeTab === 'documents' && (
+          <DocumentManager
+            projectId={project.id}
+            documents={documents}
+            onAddDocument={onAddDocument}
+            onDeleteDocument={onDeleteDocument}
+            onDownloadDocument={onDownloadDocument}
           />
         )}
       </div>

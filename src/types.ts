@@ -25,6 +25,7 @@ export interface Payment {
   remark: string;
   date: string; // ISO format or YYYY-MM-DD
   billPhoto?: string; // Base64 data-url or static placeholder path
+  billPhotoStoragePath?: string;
 }
 
 export type ContactRole = 'client' | 'vendor' | 'supplier';
@@ -52,6 +53,7 @@ export interface CloudDocument {
   syncStatus: 'synced' | 'syncing' | 'failed';
   fileType: string; // e.g. "application/pdf"
   dataUrl?: string; // local preview base64 or mock content
+  storagePath?: string;
 }
 
 export interface DbData {

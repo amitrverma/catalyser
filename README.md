@@ -15,10 +15,9 @@ View your app in AI Studio: https://ai.studio/apps/6e183bb8-3bfd-416e-9c09-f5ae0
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Optional for cloud mode: set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local`
-4. Run the Supabase migrations in `supabase/migrations` from the Supabase SQL editor or Supabase CLI
-5. Run the app:
+2. Optional for cloud mode: set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local`
+3. Run the Supabase migrations in `supabase/migrations` from the Supabase SQL editor or Supabase CLI, in filename order
+4. Run the app:
    `npm run dev`
 
 ## Checks
@@ -40,3 +39,11 @@ Add these Vercel environment variables:
 - `VITE_SUPABASE_ANON_KEY`
 
 Keep the Supabase service role key out of browser/Vercel frontend environment variables. Data security is enforced by the RLS policies in `supabase/schema.sql`.
+
+## Production Foundations
+
+- Supabase Auth gates the app when cloud env vars are configured.
+- Core project, payment, contact, document, settings, and staff data persists to Supabase.
+- Organization and role groundwork is in `supabase/migrations/20260530123000_organizations_and_roles.sql`.
+- Organization-scoped app writes, private document Storage uploads, and role-aware RLS are in `supabase/migrations/20260530131500_enterprise_tenancy_storage.sql`.
+- GitHub Actions runs typecheck, production build, and Playwright auth smoke tests on `main` and pull requests.

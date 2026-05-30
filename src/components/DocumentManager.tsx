@@ -6,8 +6,9 @@ import { UploadCloud, File, FileText, Check, AlertCircle, RefreshCcw, Download, 
 interface DocumentManagerProps {
   projectId: string;
   documents: CloudDocument[];
-  onAddDocument: (name: string, category: DocumentCategory, size: number, fileType: string) => void;
+  onAddDocument: (file: File, category: DocumentCategory) => void;
   onDeleteDocument: (docId: string) => void;
+  onDownloadDocument: (doc: CloudDocument) => void;
 }
 
 export default function DocumentManager({
@@ -15,6 +16,7 @@ export default function DocumentManager({
   documents,
   onAddDocument,
   onDeleteDocument,
+  onDownloadDocument,
 }: DocumentManagerProps) {
   const [selectedCategory, setSelectedCategory] = useState<DocumentCategory>('invoice');
   const [dragOver, setDragOver] = useState(false);
@@ -35,7 +37,7 @@ export default function DocumentManager({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
-      uploadFileMock(file);
+      uploadFile(file);
     }
   };
 
@@ -54,17 +56,12 @@ export default function DocumentManager({
     setDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      uploadFileMock(file);
+      uploadFile(file);
     }
   };
 
-  const uploadFileMock = (file: File) => {
-    onAddDocument(
-      file.name,
-      selectedCategory,
-      file.size,
-      file.type || 'application/octet-stream'
-    );
+  const uploadFile = (file: File) => {
+    onAddDocument(file, selectedCategory);
   };
 
   const formatFileSize = (bytes: number) => {
@@ -218,6 +215,10 @@ export default function DocumentManager({
                       <span className="text-blue-600 font-semibold text-[10px] flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-full animate-pulse border border-blue-200">
                         <RefreshCcw size={10} className="animate-spin" /> Syncing
                       </span>
+                    ) : doc.syncStatus === 'failed' ? (
+                      <span className="text-rose-700 font-semibold text-[10px] flex items-center gap-1 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100">
+                        <AlertCircle size={11} /> Failed
+                      </span>
                     ) : (
                       <span className="text-emerald-700 font-semibold text-[10px] flex items-center gap-0.5 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
                         <Check size={11} className="text-emerald-600" /> Synced
@@ -225,18 +226,14 @@ export default function DocumentManager({
                     )}
 
                     <div className="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
-                      {/* Fake download mock */}
-                      <a
-                        href="#"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          alert(`Simulating secure HTTPS payload assembly download of ${doc.name} from Cloud Block Storage.`);
-                        }}
-                        className="text-slate-400 hover:text-blue-600 p-1.5 rounded-lg hover:bg-slate-50"
+                      <button
+                        type="button"
+                        onClick={() => onDownloadDocument(doc)}
+                        className="text-slate-400 hover:text-blue-600 p-1.5 rounded-lg hover:bg-slate-50 border-none bg-transparent cursor-pointer"
                         title="Download file"
                       >
                         <Download size={13} />
-                      </a>
+                      </button>
                       <button
                         onClick={() => onDeleteDocument(doc.id)}
                         className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer"

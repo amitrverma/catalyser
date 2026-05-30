@@ -1,6 +1,7 @@
 import { Project, Payment, Contact, CloudDocument, DbData } from '../types';
 import { isSupabaseConfigured, supabase } from './supabase';
 import { ContactRow, DocumentRow, PaymentRow, ProjectRow } from './supabaseRows';
+import { ensureActiveOrganization } from './orgs';
 
 const INITIAL_PROJECTS: Project[] = [
   {
@@ -239,11 +240,14 @@ export async function getDbData(): Promise<DbData> {
   }
 
   try {
+    const activeOrg = await ensureActiveOrganization();
+    const orgFilter = activeOrg ? `org_id.eq.${activeOrg.id},org_id.is.null` : 'org_id.is.null';
+
     const [projectsResult, paymentsResult, contactsResult, documentsResult] = await Promise.all([
-      supabase.from('projects').select('*').order('created_at', { ascending: false }),
-      supabase.from('payments').select('*').order('payment_date', { ascending: false }),
-      supabase.from('contacts').select('*').order('created_at', { ascending: false }),
-      supabase.from('documents').select('*').order('uploaded_at', { ascending: false }),
+      supabase.from('projects').select('*').or(orgFilter).order('created_at', { ascending: false }),
+      supabase.from('payments').select('*').or(orgFilter).order('payment_date', { ascending: false }),
+      supabase.from('contacts').select('*').or(orgFilter).order('created_at', { ascending: false }),
+      supabase.from('documents').select('*').or(orgFilter).order('uploaded_at', { ascending: false }),
     ]);
 
     const error =
@@ -276,6 +280,7 @@ export async function getDbData(): Promise<DbData> {
         remark: row.remark || '',
         date: row.payment_date,
         billPhoto: row.bill_photo || undefined,
+        billPhotoStoragePath: row.bill_photo_storage_path || undefined,
       })),
       contacts: ((contactsResult.data || []) as ContactRow[]).map((row) => ({
         id: row.id,
@@ -297,6 +302,7 @@ export async function getDbData(): Promise<DbData> {
         syncStatus: row.sync_status,
         fileType: row.file_type,
         dataUrl: row.data_url || undefined,
+        storagePath: row.storage_path || undefined,
       })),
     };
 
@@ -353,10 +359,11 @@ function missingIds<T extends { id: string }>(previousRows: T[], nextRows: T[]) 
   return previousRows.map((row) => row.id).filter((id) => !nextIds.has(id));
 }
 
-function toProjectRow(project: Project, userId: string): ProjectRow {
+function toProjectRow(project: Project, userId: string, orgId: string | null): ProjectRow {
   return {
     id: project.id,
     user_id: userId,
+    org_id: orgId,
     name: project.name,
     description: project.description,
     status: project.status,
@@ -367,10 +374,11 @@ function toProjectRow(project: Project, userId: string): ProjectRow {
   };
 }
 
-function toContactRow(contact: Contact, userId: string): ContactRow {
+function toContactRow(contact: Contact, userId: string, orgId: string | null): ContactRow {
   return {
     id: contact.id,
     user_id: userId,
+    org_id: orgId,
     name: contact.name,
     role: contact.role,
     phone: contact.phone,
@@ -381,10 +389,11 @@ function toContactRow(contact: Contact, userId: string): ContactRow {
   };
 }
 
-function toPaymentRow(payment: Payment, userId: string): PaymentRow {
+function toPaymentRow(payment: Payment, userId: string, orgId: string | null): PaymentRow {
   return {
     id: payment.id,
     user_id: userId,
+    org_id: orgId,
     project_id: payment.projectId,
     type: payment.type,
     amount: payment.amount,
@@ -394,13 +403,15 @@ function toPaymentRow(payment: Payment, userId: string): PaymentRow {
     remark: payment.remark,
     payment_date: payment.date,
     bill_photo: payment.billPhoto || null,
+    bill_photo_storage_path: payment.billPhotoStoragePath || null,
   };
 }
 
-function toDocumentRow(document: CloudDocument, userId: string): DocumentRow {
+function toDocumentRow(document: CloudDocument, userId: string, orgId: string | null): DocumentRow {
   return {
     id: document.id,
     user_id: userId,
+    org_id: orgId,
     project_id: document.projectId,
     name: document.name,
     category: document.category,
@@ -409,6 +420,7 @@ function toDocumentRow(document: CloudDocument, userId: string): DocumentRow {
     sync_status: document.syncStatus,
     file_type: document.fileType,
     data_url: document.dataUrl || null,
+    storage_path: document.storagePath || null,
   };
 }
 
@@ -435,10 +447,13 @@ export async function saveDbData(data: DbData) {
     return;
   }
 
-  const projectRows = data.projects.map((project) => toProjectRow(project, user.id));
-  const contactRows = data.contacts.map((contact) => toContactRow(contact, user.id));
-  const paymentRows = data.payments.map((payment) => toPaymentRow(payment, user.id));
-  const documentRows = data.documents.map((document) => toDocumentRow(document, user.id));
+  const activeOrg = await ensureActiveOrganization();
+  const orgId = activeOrg?.id || null;
+
+  const projectRows = data.projects.map((project) => toProjectRow(project, user.id, orgId));
+  const contactRows = data.contacts.map((contact) => toContactRow(contact, user.id, orgId));
+  const paymentRows = data.payments.map((payment) => toPaymentRow(payment, user.id, orgId));
+  const documentRows = data.documents.map((document) => toDocumentRow(document, user.id, orgId));
 
   const deletedProjectIds = missingIds(previousLocalData.projects, data.projects);
   const deletedContactIds = missingIds(previousLocalData.contacts, data.contacts);

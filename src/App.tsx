@@ -13,6 +13,8 @@ import { Project, Payment, Contact, CloudDocument, ProjectStatus, PaymentType, D
 import { getDbData, saveDbData } from './lib/db';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { hydrateSettingsFromSupabase, installSettingsPersistence, persistSettingsToSupabase } from './lib/settingsSync';
+import { createWorkspaceFileUrl, uploadWorkspaceFile } from './lib/fileStorage';
+import { ensureActiveOrganization } from './lib/orgs';
 import { formatDate } from './lib/formatter';
 import Logo from './components/Logo';
 import Dashboard from './components/Dashboard';
@@ -66,15 +68,20 @@ export default function App() {
       const data = await getDbData();
       setDb(data);
     };
+    const handleSettingsSync = async () => {
+      await persistSettingsToSupabase();
+      const data = await getDbData();
+      setDb(data);
+    };
     window.addEventListener('storage', handleStorageSync);
     window.addEventListener('custom-db-updated', handleStorageSync);
-    window.addEventListener('custom-settings-updated', handleStorageSync);
+    window.addEventListener('custom-settings-updated', handleSettingsSync);
 
     return () => {
       mounted = false;
       window.removeEventListener('storage', handleStorageSync);
       window.removeEventListener('custom-db-updated', handleStorageSync);
-      window.removeEventListener('custom-settings-updated', handleStorageSync);
+      window.removeEventListener('custom-settings-updated', handleSettingsSync);
     };
   }, []);
 
@@ -232,47 +239,89 @@ export default function App() {
   };
 
   // Automated sync pipeline simulation
-  const handleAddDocument = (
-    name: string,
-    category: DocumentCategory,
-    size: number,
-    fileType: string
-  ) => {
+  const handleAddDocument = (file: File, category: DocumentCategory) => {
     const docId = `doc-${Date.now()}`;
     const newDoc: CloudDocument = {
       id: docId,
       projectId: selectedProjectId || 'unassigned',
-      name,
+      name: file.name,
       category,
-      size,
+      size: file.size,
       uploadedAt: new Date().toISOString().substring(0, 10),
-      syncStatus: 'syncing', // Starts as syncing
-      fileType,
+      syncStatus: 'syncing',
+      fileType: file.type || 'application/octet-stream',
     };
 
-    // First add document as syncing
     const updated = {
       ...db,
       documents: [newDoc, ...db.documents],
     };
     saveState(updated);
 
-    // Simulate Cloud Upload - after 2.5 seconds sync is completed
-    setTimeout(() => {
+    void (async () => {
+      let storagePath: string | null = null;
+      if (isSupabaseConfigured && supabase) {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        const activeOrg = await ensureActiveOrganization();
+        if (user) {
+          storagePath = await uploadWorkspaceFile({
+            file,
+            userId: user.id,
+            orgId: activeOrg?.id || null,
+            folder: 'documents',
+            id: docId,
+          });
+        }
+      }
+
       setDb((currentDb) => {
         if (!currentDb) return null;
-        const updatedDocs = currentDb.documents.map((d) => {
-          if (d.id === docId) {
-            return { ...d, syncStatus: 'synced' as const };
-          }
-          return d;
-        });
+        const updatedDocs = currentDb.documents.map((document) =>
+          document.id === docId
+            ? {
+                ...document,
+                syncStatus: 'synced' as const,
+                storagePath: storagePath || undefined,
+              }
+            : document,
+        );
         const finishedDb = { ...currentDb, documents: updatedDocs };
-        // Save to storage
         void saveDbData(finishedDb);
         return finishedDb;
       });
-    }, 2500);
+    })().catch((error) => {
+      console.error('Document upload failed:', error);
+      setDb((currentDb) => {
+        if (!currentDb) return null;
+        const finishedDb = {
+          ...currentDb,
+          documents: currentDb.documents.map((document) =>
+            document.id === docId ? { ...document, syncStatus: 'failed' as const } : document,
+          ),
+        };
+        void saveDbData(finishedDb);
+        return finishedDb;
+      });
+    });
+  };
+
+  const handleDownloadDocument = (document: CloudDocument) => {
+    void (async () => {
+      if (document.storagePath) {
+        const signedUrl = await createWorkspaceFileUrl(document.storagePath);
+        if (signedUrl) {
+          window.open(signedUrl, '_blank', 'noopener,noreferrer');
+          return;
+        }
+      }
+      if (document.dataUrl) {
+        window.open(document.dataUrl, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      alert('This document record does not have a stored file payload yet.');
+    })();
   };
 
   const handleDeleteDocument = (docId: string) => {
@@ -346,6 +395,7 @@ export default function App() {
             onAddContact={handleAddContact}
             onAddDocument={handleAddDocument}
             onDeleteDocument={handleDeleteDocument}
+            onDownloadDocument={handleDownloadDocument}
           />
         ) : (
           /* HOME SCREEN - LOGO & PORTFOLIO DASHBOARD */

@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const npmCommand = process.platform === 'win32' ? 'npm.cmd run dev' : 'npm run dev';
+
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30_000,
@@ -9,7 +11,7 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'npm.cmd run dev',
+    command: npmCommand,
     url: 'http://127.0.0.1:3000',
     reuseExistingServer: true,
     timeout: 120_000,
@@ -21,4 +23,3 @@ export default defineConfig({
     },
   ],
 });
-

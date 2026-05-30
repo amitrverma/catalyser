@@ -1,4 +1,5 @@
 import { isSupabaseConfigured, supabase } from './supabase';
+import { ensureActiveOrganization } from './orgs';
 
 const SETTINGS_KEYS = [
   'cc_company_name',
@@ -147,10 +148,12 @@ export async function hydrateSettingsFromSupabase() {
   } = await supabase.auth.getUser();
 
   if (!user) return;
+  const activeOrg = await ensureActiveOrganization();
+  const orgId = activeOrg?.id || null;
 
   const [settingsResult, salariesResult] = await Promise.all([
-    supabase.from('company_settings').select('settings').eq('user_id', user.id).maybeSingle(),
-    supabase.from('staff_salaries').select('salaries').eq('user_id', user.id).maybeSingle(),
+    supabase.from('company_settings').select('settings').eq('user_id', user.id).eq('org_id', orgId).maybeSingle(),
+    supabase.from('staff_salaries').select('salaries').eq('user_id', user.id).eq('org_id', orgId).maybeSingle(),
   ]);
 
   if (settingsResult.error) {
@@ -187,6 +190,8 @@ export async function persistSettingsToSupabase() {
   } = await supabase.auth.getUser();
 
   if (!user) return;
+  const activeOrg = await ensureActiveOrganization();
+  const orgId = activeOrg?.id || null;
 
   const settings = SETTINGS_KEYS.reduce<Record<string, string | null>>((acc, key) => {
     acc[key] = localStorage.getItem(key);
@@ -200,16 +205,18 @@ export async function persistSettingsToSupabase() {
     supabase.from('company_settings').upsert(
       {
         user_id: user.id,
+        org_id: orgId,
         settings,
       },
-      { onConflict: 'user_id' },
+      { onConflict: 'user_id,org_id' },
     ),
     supabase.from('staff_salaries').upsert(
       {
         user_id: user.id,
+        org_id: orgId,
         salaries,
       },
-      { onConflict: 'user_id' },
+      { onConflict: 'user_id,org_id' },
     ),
   ]);
 
@@ -234,21 +241,4 @@ export function scheduleSettingsPersist() {
 export function installSettingsPersistence() {
   if (persistenceInstalled || typeof window === 'undefined') return;
   persistenceInstalled = true;
-
-  const originalSetItem = Storage.prototype.setItem;
-  const originalRemoveItem = Storage.prototype.removeItem;
-
-  Storage.prototype.setItem = function patchedSetItem(key: string, value: string) {
-    originalSetItem.call(this, key, value);
-    if (this === window.localStorage && SYNCABLE_KEYS.has(key)) {
-      scheduleSettingsPersist();
-    }
-  };
-
-  Storage.prototype.removeItem = function patchedRemoveItem(key: string) {
-    originalRemoveItem.call(this, key);
-    if (this === window.localStorage && SYNCABLE_KEYS.has(key)) {
-      scheduleSettingsPersist();
-    }
-  };
 }
