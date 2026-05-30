@@ -1,0 +1,6 @@
+{
+  "name": "Catalyser Ledger Studio",
+  "description": "Premium on-site ledger studio for architects and interior designers, with professional GST billing, company rubber stamps and signatures, account statements, and sharing workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

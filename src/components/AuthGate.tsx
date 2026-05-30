@@ -1,0 +1,146 @@
+import React, { useEffect, useState } from 'react';
+import { LockKeyhole, Mail, UserPlus } from 'lucide-react';
+import type { Session } from '@supabase/supabase-js';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
+
+interface AuthGateProps {
+  children: React.ReactNode;
+}
+
+export default function AuthGate({ children }: AuthGateProps) {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(isSupabaseConfigured);
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (!supabase) {
+      setLoading(false);
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setLoading(false);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  if (!isSupabaseConfigured) {
+    return <>{children}</>;
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-400 text-xs font-mono tracking-widest">
+        CHECKING SECURE SESSION...
+      </div>
+    );
+  }
+
+  if (session) {
+    return <>{children}</>;
+  }
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!supabase) return;
+
+    setLoading(true);
+    setMessage('');
+
+    const result =
+      mode === 'signup'
+        ? await supabase.auth.signUp({ email, password })
+        : await supabase.auth.signInWithPassword({ email, password });
+
+    if (result.error) {
+      setMessage(result.error.message);
+      setLoading(false);
+      return;
+    }
+
+    if (mode === 'signup' && !result.data.session) {
+      setMessage('Account created. Check your email if confirmation is enabled in Supabase.');
+    }
+
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-5">
+        <div className="space-y-2">
+          <div className="w-11 h-11 rounded-xl bg-slate-900 text-white flex items-center justify-center">
+            <LockKeyhole size={20} />
+          </div>
+          <div>
+            <h1 className="text-xl font-black text-slate-900">Catalyser Cloud Login</h1>
+            <p className="text-xs text-slate-500 mt-1">
+              Sign in to sync projects, ledgers, contacts, and documents with Supabase.
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <label className="block text-xs font-bold text-slate-600">
+            Email
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+            />
+          </label>
+          <label className="block text-xs font-bold text-slate-600">
+            Password
+            <input
+              type="password"
+              required
+              minLength={6}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+            />
+          </label>
+
+          {message && (
+            <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl p-3">
+              {message}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer"
+          >
+            {mode === 'signup' ? <UserPlus size={16} /> : <Mail size={16} />}
+            {loading ? 'Please wait...' : mode === 'signup' ? 'Create Account' : 'Sign In'}
+          </button>
+        </form>
+
+        <button
+          type="button"
+          onClick={() => {
+            setMode(mode === 'signin' ? 'signup' : 'signin');
+            setMessage('');
+          }}
+          className="text-xs font-bold text-blue-700 hover:text-blue-800 bg-transparent border-none cursor-pointer"
+        >
+          {mode === 'signin' ? 'Need an account? Create one' : 'Already have an account? Sign in'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
