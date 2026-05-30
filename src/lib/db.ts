@@ -347,7 +347,79 @@ function saveLocalDbData(data: DbData) {
   }
 }
 
+function missingIds<T extends { id: string }>(previousRows: T[], nextRows: T[]) {
+  const nextIds = new Set(nextRows.map((row) => row.id));
+  return previousRows.map((row) => row.id).filter((id) => !nextIds.has(id));
+}
+
+function toProjectRow(project: Project, userId: string) {
+  return {
+    id: project.id,
+    user_id: userId,
+    name: project.name,
+    description: project.description,
+    status: project.status,
+    budget: project.budget,
+    client_name: project.clientName,
+    address: project.address || null,
+    created_at: project.createdAt,
+  };
+}
+
+function toContactRow(contact: Contact, userId: string) {
+  return {
+    id: contact.id,
+    user_id: userId,
+    name: contact.name,
+    role: contact.role,
+    phone: contact.phone,
+    email: contact.email,
+    company: contact.company || null,
+    gst_number: contact.gstNumber || null,
+    address: contact.address || null,
+  };
+}
+
+function toPaymentRow(payment: Payment, userId: string) {
+  return {
+    id: payment.id,
+    user_id: userId,
+    project_id: payment.projectId,
+    type: payment.type,
+    amount: payment.amount,
+    party: payment.party,
+    party_role: payment.partyRole,
+    payment_mode: payment.paymentMode,
+    remark: payment.remark,
+    payment_date: payment.date,
+    bill_photo: payment.billPhoto || null,
+  };
+}
+
+function toDocumentRow(document: CloudDocument, userId: string) {
+  return {
+    id: document.id,
+    user_id: userId,
+    project_id: document.projectId,
+    name: document.name,
+    category: document.category,
+    size: document.size,
+    uploaded_at: document.uploadedAt,
+    sync_status: document.syncStatus,
+    file_type: document.fileType,
+    data_url: document.dataUrl || null,
+  };
+}
+
+async function throwOnSupabaseError(operation: PromiseLike<{ error: unknown }>) {
+  const result = await operation;
+  if (result.error) {
+    throw result.error;
+  }
+}
+
 export async function saveDbData(data: DbData) {
+  const previousLocalData = getLocalDbData();
   saveLocalDbData(data);
 
   if (!isSupabaseConfigured || !supabase) {
@@ -362,79 +434,37 @@ export async function saveDbData(data: DbData) {
     return;
   }
 
-  const projectRows = data.projects.map((project) => ({
-    id: project.id,
-    user_id: user.id,
-    name: project.name,
-    description: project.description,
-    status: project.status,
-    budget: project.budget,
-    client_name: project.clientName,
-    address: project.address || null,
-    created_at: project.createdAt,
-  }));
+  const projectRows = data.projects.map((project) => toProjectRow(project, user.id));
+  const contactRows = data.contacts.map((contact) => toContactRow(contact, user.id));
+  const paymentRows = data.payments.map((payment) => toPaymentRow(payment, user.id));
+  const documentRows = data.documents.map((document) => toDocumentRow(document, user.id));
 
-  const contactRows = data.contacts.map((contact) => ({
-    id: contact.id,
-    user_id: user.id,
-    name: contact.name,
-    role: contact.role,
-    phone: contact.phone,
-    email: contact.email,
-    company: contact.company || null,
-    gst_number: contact.gstNumber || null,
-    address: contact.address || null,
-  }));
-
-  const paymentRows = data.payments.map((payment) => ({
-    id: payment.id,
-    user_id: user.id,
-    project_id: payment.projectId,
-    type: payment.type,
-    amount: payment.amount,
-    party: payment.party,
-    party_role: payment.partyRole,
-    payment_mode: payment.paymentMode,
-    remark: payment.remark,
-    payment_date: payment.date,
-    bill_photo: payment.billPhoto || null,
-  }));
-
-  const documentRows = data.documents.map((document) => ({
-    id: document.id,
-    user_id: user.id,
-    project_id: document.projectId,
-    name: document.name,
-    category: document.category,
-    size: document.size,
-    uploaded_at: document.uploadedAt,
-    sync_status: document.syncStatus,
-    file_type: document.fileType,
-    data_url: document.dataUrl || null,
-  }));
+  const deletedProjectIds = missingIds(previousLocalData.projects, data.projects);
+  const deletedContactIds = missingIds(previousLocalData.contacts, data.contacts);
+  const deletedPaymentIds = missingIds(previousLocalData.payments, data.payments);
+  const deletedDocumentIds = missingIds(previousLocalData.documents, data.documents);
 
   try {
-    await Promise.all([
-      supabase.from('payments').delete().eq('user_id', user.id),
-      supabase.from('documents').delete().eq('user_id', user.id),
-    ]);
-    await Promise.all([
-      supabase.from('projects').delete().eq('user_id', user.id),
-      supabase.from('contacts').delete().eq('user_id', user.id),
-    ]);
-
-    const inserts = [
-      projectRows.length ? supabase.from('projects').insert(projectRows) : null,
-      contactRows.length ? supabase.from('contacts').insert(contactRows) : null,
-      paymentRows.length ? supabase.from('payments').insert(paymentRows) : null,
-      documentRows.length ? supabase.from('documents').insert(documentRows) : null,
+    const deletions = [
+      deletedPaymentIds.length ? supabase.from('payments').delete().eq('user_id', user.id).in('id', deletedPaymentIds) : null,
+      deletedDocumentIds.length ? supabase.from('documents').delete().eq('user_id', user.id).in('id', deletedDocumentIds) : null,
+      deletedProjectIds.length ? supabase.from('projects').delete().eq('user_id', user.id).in('id', deletedProjectIds) : null,
+      deletedContactIds.length ? supabase.from('contacts').delete().eq('user_id', user.id).in('id', deletedContactIds) : null,
     ].filter(Boolean);
 
-    const results = await Promise.all(inserts as PromiseLike<any>[]);
-    const error = results.find((result) => result.error)?.error;
-    if (error) {
-      console.error('Supabase save failed:', error);
-    }
+    const parentUpserts = [
+      projectRows.length ? supabase.from('projects').upsert(projectRows, { onConflict: 'id' }) : null,
+      contactRows.length ? supabase.from('contacts').upsert(contactRows, { onConflict: 'id' }) : null,
+    ].filter(Boolean);
+
+    const childUpserts = [
+      paymentRows.length ? supabase.from('payments').upsert(paymentRows, { onConflict: 'id' }) : null,
+      documentRows.length ? supabase.from('documents').upsert(documentRows, { onConflict: 'id' }) : null,
+    ].filter(Boolean);
+
+    await Promise.all(deletions.map((operation) => throwOnSupabaseError(operation as PromiseLike<{ error: unknown }>)));
+    await Promise.all(parentUpserts.map((operation) => throwOnSupabaseError(operation as PromiseLike<{ error: unknown }>)));
+    await Promise.all(childUpserts.map((operation) => throwOnSupabaseError(operation as PromiseLike<{ error: unknown }>)));
   } catch (error) {
     console.error('Supabase save failed:', error);
   }
