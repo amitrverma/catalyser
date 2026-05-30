@@ -12,6 +12,7 @@ import React, { useState, useEffect } from 'react';
 import { Project, Payment, Contact, CloudDocument, ProjectStatus, PaymentType, DocumentCategory, DbData } from './types';
 import { getDbData, saveDbData } from './lib/db';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { hydrateSettingsFromSupabase, installSettingsPersistence, persistSettingsToSupabase } from './lib/settingsSync';
 import { formatDate } from './lib/formatter';
 import Logo from './components/Logo';
 import Dashboard from './components/Dashboard';
@@ -45,9 +46,14 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
 
-    getDbData().then((data) => {
-      if (mounted) setDb(data);
-    });
+    installSettingsPersistence();
+
+    hydrateSettingsFromSupabase()
+      .then(() => persistSettingsToSupabase())
+      .then(() => getDbData())
+      .then((data) => {
+        if (mounted) setDb(data);
+      });
 
     // Synchronize url params
     const params = new URLSearchParams(window.location.search);

@@ -17,8 +17,14 @@ export default function Dashboard({
   documents,
   onSelectProject
 }: DashboardProps) {
-  const [taxRate, setTaxRate] = useState<number>(20); // default tax rate of 20%
-  const [gstRate, setGstRate] = useState<number>(18); // default sales tax/GST/VAT of 18%
+  const [taxRate, setTaxRate] = useState<number>(() => {
+    const saved = localStorage.getItem('cc_tax_rate');
+    return saved ? Number(saved) : 20;
+  });
+  const [gstRate, setGstRate] = useState<number>(() => {
+    const saved = localStorage.getItem('cc_gst_rate');
+    return saved ? Number(saved) : 18;
+  });
 
   // Supplemental Custom Studio/Office Overhead expenses (not tied to specific project ledgers)
   const [customOverheads, setCustomOverheads] = useState<Array<{ id: string; label: string; amount: number }>>(() => {
@@ -111,7 +117,7 @@ export default function Dashboard({
   const totalStaffSalaries = staffList.reduce((acc, s) => acc + s.salary, 0);
   const totalCustomOverhead = customOverheads.reduce((acc, x) => acc + x.amount, 0) + totalStaffSalaries;
 
-  const [selectedFy, setSelectedFy] = useState<string>('all');
+  const [selectedFy, setSelectedFy] = useState<string>(() => localStorage.getItem('cc_selected_fy') || 'all');
 
   // Extract all unique financial years based on payments data combined with some default ones
   const availableFinancialYears = React.useMemo(() => {
@@ -284,7 +290,10 @@ export default function Dashboard({
             <span className="text-slate-300 block uppercase font-mono tracking-wider text-[9px] font-semibold">Select Fiscal Period</span>
             <select
               value={selectedFy}
-              onChange={(e) => setSelectedFy(e.target.value)}
+              onChange={(e) => {
+                setSelectedFy(e.target.value);
+                localStorage.setItem('cc_selected_fy', e.target.value);
+              }}
               className="bg-transparent text-white font-extrabold outline-hidden border-none p-0 mt-0.5 cursor-pointer text-[11px] focus:ring-0 focus:outline-hidden"
               style={{ colorScheme: 'dark' }}
             >
@@ -554,7 +563,10 @@ export default function Dashboard({
                   min="5"
                   max="45"
                   value={taxRate}
-                  onChange={(e) => setTaxRate(Number(e.target.value))}
+                  onChange={(e) => {
+                    setTaxRate(Number(e.target.value));
+                    localStorage.setItem('cc_tax_rate', e.target.value);
+                  }}
                   className="w-full accent-[#0974C6] cursor-pointer"
                 />
               </div>
@@ -567,7 +579,10 @@ export default function Dashboard({
                   min="0"
                   max="28"
                   value={gstRate}
-                  onChange={(e) => setGstRate(Number(e.target.value))}
+                  onChange={(e) => {
+                    setGstRate(Number(e.target.value));
+                    localStorage.setItem('cc_gst_rate', e.target.value);
+                  }}
                   className="w-full accent-rose-500 cursor-pointer"
                 />
               </div>

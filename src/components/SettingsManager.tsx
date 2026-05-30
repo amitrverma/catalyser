@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, ShieldCheck, Check, RotateCcw, AlertCircle, Sparkles, Building, KeyRound, MapPin, ReceiptText, Database, Cloud, RefreshCw, UploadCloud, DownloadCloud, FileDown, FileUp, Save, Server, Users, UserPlus, Trash2, Edit, Plus, X, Briefcase } from 'lucide-react';
+import { saveDbData } from '../lib/db';
 
 export default function SettingsManager() {
   const [formData, setFormData] = useState({
@@ -391,6 +392,12 @@ export default function SettingsManager() {
           localStorage.setItem(`${prefix}payments`, JSON.stringify(parsed.data.payments || []));
           localStorage.setItem(`${prefix}contacts`, JSON.stringify(parsed.data.contacts || []));
           localStorage.setItem(`${prefix}documents`, JSON.stringify(parsed.data.documents || []));
+          void saveDbData({
+            projects: parsed.data.projects,
+            payments: parsed.data.payments || [],
+            contacts: parsed.data.contacts || [],
+            documents: parsed.data.documents || []
+          });
 
           window.dispatchEvent(new Event('custom-db-updated'));
           window.dispatchEvent(new Event('custom-settings-updated'));
@@ -489,6 +496,12 @@ export default function SettingsManager() {
         localStorage.setItem(`${prefix}payments`, JSON.stringify(payload.payments || []));
         localStorage.setItem(`${prefix}contacts`, JSON.stringify(payload.contacts || []));
         localStorage.setItem(`${prefix}documents`, JSON.stringify(payload.documents || []));
+        void saveDbData({
+          projects: payload.projects,
+          payments: payload.payments || [],
+          contacts: payload.contacts || [],
+          documents: payload.documents || []
+        });
 
         window.dispatchEvent(new Event('custom-db-updated'));
         window.dispatchEvent(new Event('custom-settings-updated'));
