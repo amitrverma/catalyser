@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LockKeyhole, Mail, UserPlus } from 'lucide-react';
+import { LockKeyhole, Mail, MailCheck, UserPlus } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
@@ -95,6 +95,30 @@ export default function AuthGate({ children }: AuthGateProps) {
     setLoading(false);
   };
 
+  const handleResendVerification = async () => {
+    if (!supabase || !email) return;
+
+    setLoading(true);
+    setMessage('');
+
+    const result = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: {
+        emailRedirectTo: getAuthRedirectUrl(),
+      },
+    });
+
+    if (result.error) {
+      setMessage(result.error.message);
+      setLoading(false);
+      return;
+    }
+
+    setMessage('Verification email sent. Check your inbox and spam folder.');
+    setLoading(false);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-5">
@@ -147,6 +171,18 @@ export default function AuthGate({ children }: AuthGateProps) {
             {mode === 'signup' ? <UserPlus size={16} /> : <Mail size={16} />}
             {loading ? 'Please wait...' : mode === 'signup' ? 'Create Account' : 'Sign In'}
           </button>
+
+          {mode === 'signup' && (
+            <button
+              type="button"
+              disabled={loading || !email}
+              onClick={() => void handleResendVerification()}
+              className="w-full bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 border border-slate-200 rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <MailCheck size={16} />
+              Resend verification email
+            </button>
+          )}
         </form>
 
         <button
