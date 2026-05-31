@@ -37,8 +37,11 @@ Add these Vercel environment variables:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
+- `VITE_AUTH_REDIRECT_URL` set to your production app URL, such as `https://your-app.vercel.app`
 
 Keep the Supabase service role key out of browser/Vercel frontend environment variables. Data security is enforced by the RLS policies in `supabase/schema.sql`.
+
+In Supabase, add the same production URL to **Authentication > URL Configuration > Redirect URLs**. The app passes this URL during sign-up so email verification links return to production instead of the Supabase project Site URL fallback.
 
 ## Production Foundations
 

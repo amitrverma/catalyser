@@ -7,6 +7,20 @@ interface AuthGateProps {
   children: React.ReactNode;
 }
 
+const configuredAuthRedirectUrl = import.meta.env.VITE_AUTH_REDIRECT_URL as string | undefined;
+
+function getAuthRedirectUrl() {
+  if (configuredAuthRedirectUrl) {
+    return configuredAuthRedirectUrl;
+  }
+
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+
+  return window.location.origin;
+}
+
 export default function AuthGate({ children }: AuthGateProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(isSupabaseConfigured);
@@ -59,7 +73,13 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     const result =
       mode === 'signup'
-        ? await supabase.auth.signUp({ email, password })
+        ? await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              emailRedirectTo: getAuthRedirectUrl(),
+            },
+          })
         : await supabase.auth.signInWithPassword({ email, password });
 
     if (result.error) {
@@ -143,4 +163,3 @@ export default function AuthGate({ children }: AuthGateProps) {
     </div>
   );
 }
-
