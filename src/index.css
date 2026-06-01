@@ -1,4 +1,243 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;650;700;800&display=swap");
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Segoe UI Variable Text", "Aptos", "Segoe UI", "Roboto", "Helvetica Neue", Arial, ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Inter", "Segoe UI Variable Display", "Aptos Display", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", "SFMono-Regular", "Roboto Mono", Consolas, ui-monospace, monospace;
+  --color-brand-navy: #003366;
+  --color-brand-primary: #00509e;
+  --color-brand-action: #007acc;
+  --color-brand-accent: #66a3ff;
+  --color-brand-soft: #cce0ff;
+  --color-blue-50: #edf5ff;
+  --color-blue-100: #cce0ff;
+  --color-blue-200: #b4d3ff;
+  --color-blue-400: #66a3ff;
+  --color-blue-500: #007acc;
+  --color-blue-600: #00509e;
+  --color-blue-700: #003366;
+  --color-blue-800: #003366;
+  --color-blue-900: #003366;
+  --color-blue-950: #003366;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background:
+      radial-gradient(circle at top left, rgba(102, 163, 255, 0.24), transparent 34rem),
+      linear-gradient(180deg, #f7fbff 0%, #eef6ff 48%, #e8f2ff 100%);
+    color: #0f172a;
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+    font-variant-numeric: tabular-nums;
+    font-weight: 450;
+    line-height: 1.55;
+  }
+
+  ::selection {
+    background: rgba(102, 163, 255, 0.32);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: 0;
+    text-wrap: balance;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+  }
+
+  input,
+  select,
+  textarea {
+    transition:
+      border-color 140ms ease,
+      box-shadow 140ms ease,
+      background-color 140ms ease;
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    border-color: #007acc;
+    box-shadow: 0 0 0 3px rgba(102, 163, 255, 0.22);
+  }
+
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid rgba(0, 122, 204, 0.75);
+    outline-offset: 2px;
+  }
+
+  table,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  .bg-slate-50 {
+    background-color: #f7fbff;
+  }
+
+  .bg-slate-100 {
+    background-color: #edf5ff;
+  }
+
+  .bg-slate-950,
+  .bg-slate-900 {
+    background-color: #003366;
+  }
+
+  .hover\:bg-slate-800:hover,
+  .hover\:bg-slate-850:hover,
+  .hover\:bg-slate-900:hover {
+    background-color: #00509e;
+  }
+
+  .bg-blue-50 {
+    background-color: #edf5ff;
+  }
+
+  .bg-blue-100 {
+    background-color: #cce0ff;
+  }
+
+  .bg-blue-600 {
+    background-color: #00509e;
+  }
+
+  .hover\:bg-blue-500:hover,
+  .hover\:bg-blue-550:hover,
+  .hover\:bg-blue-600:hover {
+    background-color: #007acc;
+  }
+
+  .text-blue-500,
+  .text-blue-600 {
+    color: #007acc;
+  }
+
+  .text-blue-700,
+  .text-blue-800 {
+    color: #003366;
+  }
+
+  .border-blue-100,
+  .border-blue-200 {
+    border-color: #cce0ff;
+  }
+
+  .ring-blue-200 {
+    --tw-ring-color: #cce0ff;
+  }
+
+  .bg-white {
+    background-color: rgba(255, 255, 255, 0.96);
+  }
+
+  .border-slate-100,
+  .border-slate-120,
+  .border-slate-150,
+  .border-slate-200 {
+    border-color: #dbe3ec;
+  }
+
+  .border-slate-950 {
+    border-color: #003366;
+  }
+
+  .rounded-xl,
+  .rounded-2xl {
+    border-radius: 0.5rem;
+  }
+
+  .rounded-lg {
+    border-radius: 0.4375rem;
+  }
+
+  .shadow-xs,
+  .shadow-sm {
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 1px rgba(15, 23, 42, 0.03);
+  }
+
+  .shadow-md,
+  .shadow-lg,
+  .shadow-xl {
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.11), 0 2px 8px rgba(15, 23, 42, 0.05);
+  }
+
+  .backdrop-blur-md {
+    backdrop-filter: blur(18px);
+  }
+
+  .text-\[8px\] {
+    font-size: 0.625rem;
+  }
+
+  .text-\[9px\] {
+    font-size: 0.6875rem;
+  }
+
+  .text-\[10px\] {
+    font-size: 0.75rem;
+  }
+
+  .text-\[11px\] {
+    font-size: 0.8125rem;
+  }
+
+  .text-xs {
+    font-size: 0.8125rem;
+    line-height: 1.35;
+  }
+
+  .text-sm {
+    font-size: 0.9375rem;
+    line-height: 1.45;
+  }
+
+  .text-base {
+    font-size: 1.0625rem;
+    line-height: 1.45;
+  }
+
+  .font-medium {
+    font-weight: 550;
+  }
+
+  .font-semibold {
+    font-weight: 650;
+  }
+
+  .font-bold {
+    font-weight: 700;
+  }
+
+  .font-extrabold {
+    font-weight: 800;
+  }
+
+  .tracking-tight {
+    letter-spacing: 0;
+  }
+}
 
 @media print {
   /* Hide standard page layout and Chrome UI chrome elements */

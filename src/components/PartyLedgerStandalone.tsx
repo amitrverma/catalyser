@@ -149,7 +149,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
               {partyName.charAt(0).toUpperCase()}
             </div>
             <div>
-              <h1 className="text-lg font-black tracking-tight leading-tight uppercase">Party Accounts Vault</h1>
+              <h1 className="text-lg font-black tracking-tight leading-tight uppercase">Party Accounts</h1>
               <span className="text-[10px] text-slate-400 font-mono tracking-widest block uppercase mt-0.5">
                 SECURE TRANSACTION RECORD STATEMENT
               </span>
@@ -178,7 +178,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
         <div className="bg-white rounded-2xl border border-slate-150 p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-xs">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase font-bold tracking-widest text-[#016fca] bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
+              <span className="text-[10px] uppercase font-bold tracking-widest text-[#00509e] bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
                 {contactProfile?.role || 'Other'} Profile
               </span>
               {contactProfile?.company && (
@@ -527,7 +527,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2.5 bg-[#456276] hover:bg-slate-700 text-white rounded-xl cursor-pointer transition shadow-xs"
+                    className="px-4 py-2.5 bg-[#00509e] hover:bg-[#007acc] text-white rounded-xl cursor-pointer transition shadow-xs"
                   >
                     Save Changes
                   </button>

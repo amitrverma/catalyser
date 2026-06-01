@@ -155,8 +155,8 @@ export default function DocumentManager({
         <div className="lg:col-span-2 bg-white rounded-xl border border-slate-150 p-5 space-y-4">
           <div className="flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center border-b border-slate-100 pb-3 text-left">
             <div>
-              <h3 className="font-bold text-slate-800 text-sm">Automated Backup Vault</h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">Dual backup syncing: local client encryption + Google Cloud Storage</p>
+              <h3 className="font-bold text-slate-800 text-sm">Documents</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">Project files, drawings, bills, and reference documents.</p>
             </div>
 
             <div className="flex gap-2 text-xs">

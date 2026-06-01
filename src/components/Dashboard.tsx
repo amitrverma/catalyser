@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Project, Payment, Contact, CloudDocument, TaxReportData } from '../types';
+import { Project, Payment, Contact, CloudDocument } from '../types';
 import { DollarSign, FileText, Percent, ShieldCheck, TrendingUp, TrendingDown, Layers, Landmark, HardHat, CircleCheck, AlertCircle, Plus, Trash2, Edit, Check, X, Briefcase } from 'lucide-react';
+import { formatCompactNumber, formatCurrency } from '../lib/formatter';
 
 interface DashboardProps {
   projects: Project[];
@@ -172,9 +173,8 @@ export default function Dashboard({
   const marginPercentage = totalCashIn > 0 ? (netProfit / totalCashIn) * 100 : 0;
 
   // Document states
-  const totalDocSize = documents.reduce((acc, d) => acc + d.size, 0);
-  const formattedDocSize = (totalDocSize / (1024 * 1024)).toFixed(2); // in MB
   const docsPending = documents.filter((d) => d.syncStatus === 'syncing').length;
+  const docsReady = documents.length - docsPending;
 
   // Tax calculations based on filtered payments
   // Deductibles are payments out given to vendors or suppliers (as opposed to client payouts or 'other')
@@ -278,15 +278,15 @@ export default function Dashboard({
   return (
     <div className="space-y-6" id="dashboard-container">
       {/* Prime Header Dashboard row */}
-      <div className="bg-gradient-to-r from-[#3B5161] to-[#456276] text-white p-6 rounded-2xl shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4" id="dashboard-hero-header">
+      <div className="bg-slate-950 text-white p-6 rounded-2xl shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4" id="dashboard-hero-header">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Financial Catalyser Studio</h2>
+          <h2 className="text-2xl font-bold tracking-tight">Financial Dashboard</h2>
           <p className="text-slate-200 text-sm mt-1">
             Real-time aggregate overheads, budget utilization, and tax estimators.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <div className="bg-white/15 px-3 py-1.5 rounded-xl backdrop-blur-md border border-white/10 text-xs flex flex-col justify-center text-left" id="fy-filter-selector">
+          <div className="bg-white/10 px-3 py-1.5 rounded-xl backdrop-blur-md border border-white/10 text-xs flex flex-col justify-center text-left" id="fy-filter-selector">
             <span className="text-slate-300 block uppercase font-mono tracking-wider text-[9px] font-semibold">Select Fiscal Period</span>
             <select
               value={selectedFy}
@@ -297,28 +297,21 @@ export default function Dashboard({
               className="bg-transparent text-white font-extrabold outline-hidden border-none p-0 mt-0.5 cursor-pointer text-[11px] focus:ring-0 focus:outline-hidden"
               style={{ colorScheme: 'dark' }}
             >
-              <option value="all" className="bg-[#3B5161] text-white">📅 All Time (Aggregate)</option>
+              <option value="all" className="bg-[#003366] text-white">All Time</option>
               {availableFinancialYears.map((startYr) => (
-                <option key={startYr} value={startYr.toString()} className="bg-[#3B5161] text-white">
-                  📅 FY {startYr}-{((startYr + 1) % 100).toString().padStart(2, '0')} (1 Apr - 31 Mar)
+                <option key={startYr} value={startYr.toString()} className="bg-[#003366] text-white">
+                  FY {startYr}-{((startYr + 1) % 100).toString().padStart(2, '0')} (1 Apr - 31 Mar)
                 </option>
               ))}
             </select>
           </div>
-          <div className="bg-white/10 px-4 py-2 rounded-xl backdrop-blur-md border border-white/10 text-xs">
-            <span className="text-slate-350 block uppercase font-mono tracking-wider">Cloud Storage Status</span>
-            <span className="font-semibold flex items-center gap-1.5 mt-0.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              {formattedDocSize} MB Synced
-            </span>
-          </div>
           <button
             onClick={triggerCsvDownload}
-            className="bg-[#0974C6] hover:bg-blue-600 font-medium text-xs px-4 py-2.5 rounded-xl transition shadow-md cursor-pointer flex items-center gap-1.5"
+            className="bg-white text-slate-950 hover:bg-slate-100 font-semibold text-xs px-4 py-2.5 rounded-xl transition shadow-sm cursor-pointer flex items-center gap-1.5"
             id="download-tax-btn"
           >
             <FileText size={14} />
-            Export Tax Form
+            Export report
           </button>
         </div>
       </div>
@@ -327,24 +320,24 @@ export default function Dashboard({
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4" id="stats-dashboard-bento flex">
         {/* Card 1: Budget Total */}
         <div className="bg-white p-5 rounded-2xl border border-slate-120 shadow-xs flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-orange-50 text-orange-600">
+          <div className="p-3.5 rounded-xl bg-slate-100 text-slate-700">
             <Layers size={22} />
           </div>
           <div>
-            <span className="text-slate-400 text-xs font-medium block">Total Projects Value</span>
-            <span className="text-xl font-bold text-slate-800">₹{totalBudget.toLocaleString()}</span>
-            <span className="text-[10px] text-slate-500 block mt-0.5">Across {projects.length} portfolios</span>
+            <span className="text-slate-400 text-xs font-medium block">Total Project Value</span>
+            <span className="text-xl font-bold text-slate-800">{formatCurrency(totalBudget)}</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">Across {projects.length} projects</span>
           </div>
         </div>
 
         {/* Card 2: Cash In / Billing */}
         <div className="bg-white p-5 rounded-2xl border border-slate-120 shadow-xs flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-[#0974C6]/10 text-[#0974C6]">
+          <div className="p-3.5 rounded-xl bg-[#cce0ff] text-[#00509e]">
             <TrendingUp size={22} />
           </div>
           <div>
-            <span className="text-slate-400 text-xs font-medium block">Total Receipts (In)</span>
-            <span className="text-xl font-bold text-emerald-600">₹{totalCashIn.toLocaleString()}</span>
+            <span className="text-slate-400 text-xs font-medium block">Total Receipts</span>
+            <span className="text-xl font-bold text-emerald-600">{formatCurrency(totalCashIn)}</span>
             <span className="text-[10px] text-slate-500 block mt-0.5">Retainers &amp; milestones</span>
           </div>
         </div>
@@ -355,21 +348,21 @@ export default function Dashboard({
             <TrendingDown size={22} />
           </div>
           <div>
-            <span className="text-slate-400 text-xs font-medium block">Total Outlays (Out)</span>
-            <span className="text-xl font-bold text-rose-600">₹{totalCashOut.toLocaleString()}</span>
+            <span className="text-slate-400 text-xs font-medium block">Total Expenses</span>
+            <span className="text-xl font-bold text-rose-600">{formatCurrency(totalCashOut)}</span>
             <span className="text-[10px] text-slate-500 block mt-0.5">Labor &amp; Material purchases</span>
           </div>
         </div>
 
         {/* Card 4: Net Balance */}
         <div className="bg-white p-5 rounded-2xl border border-slate-120 shadow-xs flex items-center gap-4">
-          <div className="p-3.5 rounded-xl bg-purple-50 text-purple-600">
+          <div className="p-3.5 rounded-xl bg-slate-100 text-slate-700">
             <Landmark size={22} />
           </div>
           <div>
-            <span className="text-slate-400 text-xs font-medium block">Net Liquidity Margin</span>
+            <span className="text-slate-400 text-xs font-medium block">Net Balance</span>
             <span className={`text-xl font-bold ${netProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-              ₹{netProfit.toLocaleString()}
+              {formatCurrency(netProfit)}
             </span>
             <span className="text-[10px] text-slate-500 block mt-0.5">Margin: {marginPercentage.toFixed(1)}%</span>
           </div>
@@ -382,7 +375,7 @@ export default function Dashboard({
         <div className="bg-white p-5 rounded-2xl border border-slate-120 shadow-xs flex flex-col justify-between">
           <div>
             <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
-              <HardHat size={18} className="text-[#0974C6]" />
+              <HardHat size={18} className="text-[#00509e]" />
               Expenditure Breakdown
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">Outlays distributed by supply partner roles</p>
@@ -406,7 +399,7 @@ export default function Dashboard({
                       cy="50"
                       r="40"
                       fill="transparent"
-                      stroke="#0974C6"
+                      stroke="#007acc"
                       strokeWidth="12"
                       strokeDasharray={`${(materialExpenses / totalCashOut) * 251.2} 251.2`}
                     />
@@ -416,7 +409,7 @@ export default function Dashboard({
                       cy="50"
                       r="40"
                       fill="transparent"
-                      stroke="#456276"
+                      stroke="#00509e"
                       strokeWidth="12"
                       strokeDasharray={`${(contractingExpenses / totalCashOut) * 251.2} 251.2`}
                       strokeDashoffset={`-${(materialExpenses / totalCashOut) * 251.2}`}
@@ -427,7 +420,7 @@ export default function Dashboard({
                       cy="50"
                       r="40"
                       fill="transparent"
-                      stroke="#A3B8C3"
+                      stroke="#66a3ff"
                       strokeWidth="12"
                       strokeDasharray={`${(overheadExpenses / totalCashOut) * 251.2} 251.2`}
                       strokeDashoffset={`-${((materialExpenses + contractingExpenses) / totalCashOut) * 251.2}`}
@@ -436,7 +429,7 @@ export default function Dashboard({
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
                     <span className="text-[10px] text-slate-400 font-medium uppercase">Outlays</span>
                     <span className="text-base font-extrabold text-slate-800">
-                      ₹{(totalCashOut >= 1000 ? (totalCashOut / 1000).toFixed(1) + 'k' : totalCashOut)}
+                      {formatCompactNumber(totalCashOut)}
                     </span>
                   </div>
                 </div>
@@ -444,24 +437,24 @@ export default function Dashboard({
                 {/* Legend panel */}
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-[#0974C6]"></span>
+                    <span className="w-3 h-3 rounded bg-[#007acc]"></span>
                     <div className="text-left">
                       <span className="text-[10px] text-slate-400 block leading-tight">Suppliers</span>
-                      <span className="text-xs font-semibold text-slate-700">₹{materialExpenses.toLocaleString()}</span>
+                      <span className="text-xs font-semibold text-slate-700">{formatCurrency(materialExpenses)}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-[#456276]"></span>
+                    <span className="w-3 h-3 rounded bg-[#00509e]"></span>
                     <div className="text-left">
                       <span className="text-[10px] text-slate-400 block leading-tight">Vendors</span>
-                      <span className="text-xs font-semibold text-slate-700">₹{contractingExpenses.toLocaleString()}</span>
+                      <span className="text-xs font-semibold text-slate-700">{formatCurrency(contractingExpenses)}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-[#A3B8C3]"></span>
+                    <span className="w-3 h-3 rounded bg-[#66a3ff]"></span>
                     <div className="text-left">
                       <span className="text-[10px] text-slate-400 block leading-tight">Overhead</span>
-                      <span className="text-xs font-semibold text-slate-700">₹{overheadExpenses.toLocaleString()}</span>
+                      <span className="text-xs font-semibold text-slate-700">{formatCurrency(overheadExpenses)}</span>
                     </div>
                   </div>
                 </div>
@@ -471,74 +464,43 @@ export default function Dashboard({
 
           <div className="border-t border-slate-100 pt-3 text-center">
             <span className="text-[11px] text-slate-400">
-              Tax deductions are optimized based on Material &amp; Vendor classifications
+              Deduction estimates use supplier and vendor classifications
             </span>
           </div>
         </div>
 
-        {/* Cloud Document Sync Console */}
+        {/* Documents */}
         <div className="bg-white p-5 rounded-2xl border border-slate-120 shadow-xs flex flex-col justify-between">
           <div>
             <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
               <ShieldCheck size={18} className="text-emerald-600" />
-              Cloud Sync Locker
+              Documents
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">Secure automated storage back-up diagnostics</p>
+            <p className="text-xs text-slate-400 mt-0.5">Project drawings, bills, references, and approvals.</p>
           </div>
 
           <div className="py-4 space-y-3">
-            {/* Storage Utilization Gauge */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs font-semibold">
-                <span className="text-slate-600">Cloud Storage Vol (Used/Simulated)</span>
-                <span className="text-[#0974C6]">{formattedDocSize} / 50.0 MB</span>
-              </div>
-              <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden flex">
-                <div
-                  className="bg-emerald-500 h-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, (parseFloat(formattedDocSize) / 50) * 100)}%` }}
-                ></div>
-              </div>
-            </div>
-
-            {/* Simulated Cloud Credentials Information */}
-            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1">
-              <div className="flex justify-between text-[10px]">
-                <span className="text-slate-400">GCP Cloud Storage Bucket</span>
-                <span className="font-mono text-slate-700">cc-catalyser-cloud-docs</span>
-              </div>
-              <div className="flex justify-between text-[10px]">
-                <span className="text-slate-400">Secure Backup Encryption</span>
-                <span className="text-emerald-600 font-semibold flex items-center gap-0.5">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span> AES-256
-                </span>
-              </div>
-              <div className="flex justify-between text-[10px]">
-                <span className="text-slate-400">Sync Pipeline Health</span>
-                <span className="text-slate-700">Fully Operational</span>
-              </div>
-            </div>
-
-            {/* Sync status counters */}
             <div className="grid grid-cols-3 gap-2 text-center text-xs pt-1">
               <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
                 <span className="text-emerald-600 font-bold block">{documents.length}</span>
-                <span className="text-[9px] text-slate-400 uppercase">Synced</span>
+                <span className="text-[9px] text-slate-400 uppercase">Total</span>
               </div>
               <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
-                <span className="text-blue-600 font-bold block">{docsPending}</span>
+                <span className="text-blue-600 font-bold block">{docsReady}</span>
+                <span className="text-[9px] text-slate-400 uppercase">Ready</span>
+              </div>
+              <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                <span className="text-slate-500 font-bold block">{docsPending}</span>
                 <span className="text-[9px] text-slate-400 uppercase">Pending</span>
-              </div>
-              <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
-                <span className="text-slate-500 font-bold block">0</span>
-                <span className="text-[9px] text-slate-400 uppercase">Failed</span>
               </div>
             </div>
           </div>
 
-          <div className="text-center font-mono text-[10px] text-[#456276] bg-slate-50 py-1 rounded-lg">
-            Status: SSL / TLS Handshake Verified
-          </div>
+          {docsPending > 0 && (
+            <div className="text-center text-[10px] text-blue-700 bg-blue-50 py-1 rounded-lg">
+              Sync in progress
+            </div>
+          )}
         </div>
 
         {/* Small Business Automatic Tax Planner */}
@@ -546,7 +508,7 @@ export default function Dashboard({
           <div>
             <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
               <Percent size={18} className="text-rose-500" />
-              Automated Tax Forecaster
+              Tax Estimate
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">Calculates deductions and estimates liability</p>
           </div>
@@ -567,7 +529,7 @@ export default function Dashboard({
                     setTaxRate(Number(e.target.value));
                     localStorage.setItem('cc_tax_rate', e.target.value);
                   }}
-                  className="w-full accent-[#0974C6] cursor-pointer"
+                  className="w-full accent-[#007acc] cursor-pointer"
                 />
               </div>
               <div className="space-y-1">
@@ -592,19 +554,19 @@ export default function Dashboard({
             <div className="space-y-1.5 text-xs">
               <div className="flex justify-between py-1 border-b border-dashed border-slate-100 text-slate-600">
                 <span>Deductible Expenses</span>
-                <span className="font-semibold text-emerald-600">-₹{totalDeductibles.toLocaleString()}</span>
+                <span className="font-semibold text-emerald-600">-{formatCurrency(totalDeductibles)}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-dashed border-slate-100 text-slate-600">
                 <span>Taxable Base Profit</span>
-                <span className="font-semibold text-slate-700">₹{taxableIncome.toLocaleString()}</span>
+                <span className="font-semibold text-slate-700">{formatCurrency(taxableIncome)}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-dashed border-slate-100 text-slate-600">
                 <span>Est. Income Tax Due</span>
-                <span className="font-semibold text-rose-500">₹{estimatedTax.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                <span className="font-semibold text-rose-500">{formatCurrency(estimatedTax)}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-dashed border-slate-100 text-slate-600">
                 <span>Estimated Net GST/VAT Owed</span>
-                <span className="font-semibold text-stone-700">₹{netGstOwed.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                <span className="font-semibold text-stone-700">{formatCurrency(netGstOwed)}</span>
               </div>
             </div>
           </div>
@@ -612,7 +574,7 @@ export default function Dashboard({
           <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-100 p-2 rounded-xl">
             <AlertCircle size={14} className="text-rose-500 shrink-0" />
             <span className="text-[10px] text-rose-700 tracking-tight">
-              Calculations based on self-employed deductions standard Schedule C logic.
+              Estimates are directional and should be reviewed before filing.
             </span>
           </div>
         </div>
@@ -623,15 +585,15 @@ export default function Dashboard({
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3" id="overhead-header">
           <div className="space-y-0.5">
             <h3 className="font-extrabold text-slate-800 text-sm md:text-base flex items-center gap-2">
-              <Briefcase size={18} className="text-[#0974C6]" />
-              Office &amp; Studio Overhead Planner
+              <Briefcase size={18} className="text-[#00509e]" />
+              Overhead Planner
             </h3>
             <p className="text-xs text-slate-400">
               Incorporate recurring studio, rental, software licensing, or general operational overhead expenses (non-project-specific) to refine net margins and tax forecasting.
             </p>
           </div>
           <div className="text-[11px] font-bold text-slate-700 bg-slate-100 border border-slate-150 px-3 py-1.5 rounded-lg shrink-0">
-            Total Overheads: <span className="text-[#0974C6] font-extrabold font-mono text-xs">₹{totalCustomOverhead.toLocaleString()}</span>
+            Total Overheads: <span className="text-[#00509e] font-extrabold font-mono text-xs">{formatCurrency(totalCustomOverhead)}</span>
           </div>
         </div>
 
@@ -661,7 +623,7 @@ export default function Dashboard({
                     </div>
                   </td>
                   <td className="py-3 text-right">
-                    <span className="font-mono font-bold text-slate-700">₹{staff.salary.toLocaleString()}</span>
+                    <span className="font-mono font-bold text-slate-700">{formatCurrency(staff.salary)}</span>
                     <span className="text-[9px] text-slate-400 block font-mono">/ Month</span>
                   </td>
                   <td className="py-3 text-center">
@@ -694,16 +656,15 @@ export default function Dashboard({
                     <td className="py-3 text-right">
                       {editingId === item.id ? (
                         <div className="relative inline-block w-full">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
                           <input
                             type="number"
                             value={editingAmount}
                             onChange={(e) => setEditingAmount(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 pl-6 pr-2.5 py-1 rounded-lg text-right font-mono font-bold text-slate-800 focus:outline-hidden"
+                            className="w-full bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-right font-mono font-bold text-slate-800 focus:outline-hidden"
                           />
                         </div>
                       ) : (
-                        <span className="font-mono font-bold text-slate-700">₹{item.amount.toLocaleString()}</span>
+                        <span className="font-mono font-bold text-slate-700">{formatCurrency(item.amount)}</span>
                       )}
                     </td>
                     <td className="py-3 text-center">
@@ -769,10 +730,9 @@ export default function Dashboard({
           </div>
           <div className="w-full md:w-44 text-left">
             <label className="text-[9px] uppercase font-bold tracking-wider text-slate-400 block mb-1">
-              Operational Cost (₹)
+              Operational Cost (INR)
             </label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">₹</span>
               <input
                 type="number"
                 required
@@ -780,14 +740,14 @@ export default function Dashboard({
                 placeholder="0"
                 value={newAmount}
                 onChange={(e) => setNewAmount(e.target.value)}
-                className="w-full bg-white border border-slate-250 text-xs pl-7 pr-3 py-2 rounded-xl text-slate-800 placeholder-slate-400 font-mono font-bold focus:outline-hidden"
+                className="w-full bg-white border border-slate-250 text-xs px-3 py-2 rounded-xl text-slate-800 placeholder-slate-400 font-mono font-bold focus:outline-hidden"
               />
             </div>
           </div>
           <div className="flex items-end">
             <button
               type="submit"
-              className="w-full bg-[#0974C6] hover:bg-blue-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl border-none cursor-pointer shadow-xs transition-all flex items-center justify-center gap-1.5"
+              className="w-full bg-[#00509e] hover:bg-[#007acc] text-white text-xs font-bold px-4 py-2.5 rounded-xl border-none cursor-pointer shadow-xs transition-all flex items-center justify-center gap-1.5"
             >
               <Plus size={14} /> Add Particular
             </button>
@@ -799,8 +759,8 @@ export default function Dashboard({
       <div className="bg-white p-5 rounded-2xl border border-slate-120 shadow-xs">
         <div className="flex justify-between items-center mb-4">
           <div>
-            <h3 className="font-bold text-slate-800 text-base">Quick Access Portfolios</h3>
-            <p className="text-xs text-slate-400">Instant jump to view and manage project ledgers</p>
+            <h3 className="font-bold text-slate-800 text-base">Quick Access Projects</h3>
+            <p className="text-xs text-slate-400">Open a project ledger directly.</p>
           </div>
           <div className="flex gap-2">
             <span className="text-xs px-2.5 py-1 bg-blue-50 text-blue-700 font-semibold rounded-lg">
@@ -833,10 +793,10 @@ export default function Dashboard({
               <div
                 key={proj.id}
                 onClick={() => onSelectProject(proj.id)}
-                className="group border border-slate-100 hover:border-[#0974C6]/40 p-4 rounded-xl cursor-pointer hover:bg-slate-50/50 transition-all text-left"
+                className="group border border-slate-100 hover:border-[#66a3ff] p-4 rounded-xl cursor-pointer hover:bg-blue-50 transition-all text-left"
               >
                 <div className="flex justify-between items-start gap-2">
-                  <h4 className="font-bold text-sm text-slate-800 group-hover:text-[#0974C6] line-clamp-1 transition-colors">
+                  <h4 className="font-bold text-sm text-slate-800 group-hover:text-[#00509e] line-clamp-1 transition-colors">
                     {proj.name}
                   </h4>
                   <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${badgeColor}`}>
@@ -852,7 +812,7 @@ export default function Dashboard({
                   </div>
                   <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
                     <div
-                      className="bg-[#0974C6] h-full"
+                      className="bg-[#007acc] h-full"
                       style={{ width: `${Math.min(100, percentUsed)}%` }}
                     ></div>
                   </div>
@@ -860,12 +820,12 @@ export default function Dashboard({
 
                 <div className="grid grid-cols-2 gap-2 mt-3.5 pt-3 border-t border-slate-100 text-[11px]">
                   <div>
-                    <span className="text-slate-400 block uppercase tracking-wider text-[9px]">Receipts (In)</span>
-                    <span className="font-bold text-emerald-600">₹{inflow.toLocaleString()}</span>
+                    <span className="text-slate-400 block uppercase tracking-wider text-[9px]">Receipts</span>
+                    <span className="font-bold text-emerald-600">{formatCurrency(inflow)}</span>
                   </div>
                   <div>
-                    <span className="text-slate-400 block uppercase tracking-wider text-[9px]">Expenses (Out)</span>
-                    <span className="font-bold text-rose-500">₹{outflow.toLocaleString()}</span>
+                    <span className="text-slate-400 block uppercase tracking-wider text-[9px]">Expenses</span>
+                    <span className="font-bold text-rose-500">{formatCurrency(outflow)}</span>
                   </div>
                 </div>
               </div>

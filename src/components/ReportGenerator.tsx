@@ -271,7 +271,7 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
       {/* Actions and sheet controls */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 print:hidden">
         <span className="text-xs text-slate-400 font-bold uppercase tracking-wider font-mono">
-          Matches: <span className="text-[#0974C6]">{sortedPayments.length} transactions</span> filtered
+          Matches: <span className="text-[#00509e]">{sortedPayments.length} transactions</span> filtered
         </span>
         <div className="flex gap-2">
           <button
@@ -283,7 +283,7 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
           
           <button
             onClick={handleDownloadExcel}
-            className="bg-[#456276] hover:bg-slate-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition duration-150"
+            className="bg-[#00509e] hover:bg-[#007acc] text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition duration-150"
           >
             <Download size={14} /> Download Excel (CSV)
           </button>

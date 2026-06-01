@@ -429,19 +429,19 @@ export default function SettingsManager() {
       }
       const res = await fetch(cloudEndpoint, { method: 'GET', headers });
       if (res.ok) {
-        setTestStatus({ success: true, message: `Ping success! Status: ${res.status}. Data channel open.` });
+        setTestStatus({ success: true, message: `Connection successful. Status ${res.status}.` });
       } else {
-        setTestStatus({ success: true, message: `Access validated. Server reported response status ${res.status}. POST operational.` });
+        setTestStatus({ success: true, message: `Connection reached the server. Status ${res.status}.` });
       }
     } catch (err: any) {
-      setTestStatus({ success: false, message: `Verification check: ${err?.message || 'Access blocked/CORS shield'}.` });
+      setTestStatus({ success: false, message: `Connection failed: ${err?.message || 'Unable to reach endpoint'}.` });
     }
     setTimeout(() => setTestStatus(null), 6000);
   };
 
   const handlePushToCloud = async () => {
     if (!cloudEndpoint) {
-      setSyncStatus({ type: 'push', success: false, message: 'Cloud URL is null.' });
+      setSyncStatus({ type: 'push', success: false, message: 'Add an API endpoint first.' });
       return;
     }
     try {
@@ -462,7 +462,7 @@ export default function SettingsManager() {
         body: JSON.stringify(data)
       });
       if (res.ok) {
-        setSyncStatus({ type: 'push', success: true, message: 'All local entities backed up to the cloud storage registry successfully!' });
+        setSyncStatus({ type: 'push', success: true, message: 'Local data uploaded successfully.' });
       } else {
         setSyncStatus({ type: 'push', success: false, message: `Sync rejected. Server status: ${res.status}.` });
       }
@@ -993,7 +993,7 @@ export default function SettingsManager() {
               </div>
               <div className="space-y-1">
                 <span className="text-[10px] font-mono tracking-wider font-bold text-slate-400 block uppercase">Audit Safe Security</span>
-                <h5 className="font-extrabold text-white text-xs">On-Device Local Sandbox</h5>
+                <h5 className="font-extrabold text-white text-xs">Local Storage</h5>
                 <p className="text-[10px] text-slate-405 leading-relaxed">
                   All company settings are safely and privately locked within your browser’s isolated local sandbox filesystem. No unencrypted corporate financial identifiers leaving current endpoint.
                 </p>
@@ -1070,14 +1070,13 @@ export default function SettingsManager() {
                     <td className="py-3 text-right">
                       {editingStaffId === item.id ? (
                         <div className="relative inline-block w-full">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
                           <input
                             type="number"
                             required
                             min="1"
                             value={editingStaffSalary}
                             onChange={(e) => setEditingStaffSalary(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 pl-6 pr-2.5 py-1 rounded-lg text-right font-mono font-bold text-slate-800 focus:outline-none"
+                            className="w-full bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-right font-mono font-bold text-slate-800 focus:outline-none"
                           />
                         </div>
                       ) : (
@@ -1164,10 +1163,9 @@ export default function SettingsManager() {
           </div>
           <div className="w-full md:w-44 text-left">
             <label className="text-[9px] uppercase font-bold tracking-wider text-slate-400 block mb-1">
-              Monthly Salary (₹)
+              Monthly Salary (INR)
             </label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs font-mono">₹</span>
               <input
                 type="number"
                 required
@@ -1175,7 +1173,7 @@ export default function SettingsManager() {
                 placeholder="e.g. 45050"
                 value={newStaffSalary}
                 onChange={(e) => setNewStaffSalary(e.target.value)}
-                className="w-full bg-white border border-slate-250 text-xs pl-7 pr-3 py-2 rounded-xl text-slate-800 placeholder-slate-400 font-mono font-bold focus:outline-none"
+                className="w-full bg-white border border-slate-250 text-xs px-3 py-2 rounded-xl text-slate-800 placeholder-slate-400 font-mono font-bold focus:outline-none"
               />
             </div>
           </div>
@@ -1190,24 +1188,24 @@ export default function SettingsManager() {
         </form>
       </div>
 
-      {/* Database Location & Storage Infrastructure Area */}
+      {/* Backups */}
       <div className="bg-white p-6 rounded-2xl border border-slate-150 space-y-5 text-left" id="database-storage-settings">
         <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
           <div>
             <h4 className="font-extrabold text-slate-800 text-xs sm:text-sm uppercase tracking-wider flex items-center gap-1.5">
-              <Database size={16} className="text-blue-600" /> Database Location & Storage Infrastructure
+              <Database size={16} className="text-blue-600" /> Backups
             </h4>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Configure whether to persist transaction logs, bills, and project portfolios inside the local browser sandbox or synchronize to an external cloud database.
+              Export or restore workspace data when moving between devices.
             </p>
           </div>
-          <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-mono uppercase tracking-wider block shrink-0">
-            {storageType === 'local' ? 'Local sandbox active' : 'Connected to API cloud'}
+          <span className="hidden text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-mono uppercase tracking-wider shrink-0">
+            {storageType === 'local' ? 'Local storage' : 'Cloud storage'}
           </span>
         </div>
 
         {/* Storage Segment Picker Tab Button Selector */}
-        <div className="flex bg-slate-50 p-1 rounded-xl w-full max-w-[420px] border border-slate-150">
+        <div className="hidden bg-slate-50 p-1 rounded-xl w-full max-w-[420px] border border-slate-150">
           <button
             type="button"
             onClick={() => setStorageType('local')}
@@ -1218,7 +1216,7 @@ export default function SettingsManager() {
             }`}
           >
             <Server size={14} />
-            <span>Local Browser Storage</span>
+            <span>Local Storage</span>
           </button>
           <button
             type="button"
@@ -1230,25 +1228,25 @@ export default function SettingsManager() {
             }`}
           >
             <Cloud size={14} />
-            <span>Cloud REST API Storage</span>
+            <span>Cloud Storage</span>
           </button>
         </div>
 
         <form onSubmit={handleSaveStorageSettings} className="space-y-5">
-          {storageType === 'local' ? (
+          {true ? (
             <div className="space-y-4 pt-1">
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/60 max-w-2xl text-[11px] text-slate-600 leading-relaxed space-y-2">
+              <div className="hidden bg-slate-50 p-4 rounded-xl border border-slate-200/60 max-w-2xl text-[11px] text-slate-600 leading-relaxed space-y-2">
                 <p>
-                  <strong>💡 Local Sandbox Mode:</strong> Your architectural ledgers are securely recorded inside this browser's <code>localStorage</code> sandbox. This keeps details fully client-side for maximum confidentiality.
+                  <strong>Local storage:</strong> Records are saved in this browser. Use export/import when moving data to another device or browser.
                 </p>
                 <p>
-                  To manage multiple workspace folder environments or segregate separate accounts, modify the custom <strong>Storage Key Path prefix</strong> below.
+                  Change the key prefix only if you intentionally want a separate local workspace.
                 </p>
               </div>
 
-              <div className="space-y-1.5 max-w-md">
+              <div className="hidden space-y-1.5 max-w-md">
                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
-                  Storage Namespace Prefix / Save Path
+                  Storage Key Prefix
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <input
@@ -1260,7 +1258,7 @@ export default function SettingsManager() {
                     className="flex-1 bg-slate-50 border border-slate-205 rounded-xl p-3 text-xs font-mono font-bold text-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 transition"
                   />
                   <div className="text-[10px] flex items-center text-slate-400 font-semibold italic bg-slate-100/50 px-3 py-2 sm:py-0 rounded-xl border">
-                    Key resolves to: <code className="text-slate-700 ml-1.5 font-bold font-mono">{localPrefix}projects</code>
+                    Saves as <code className="text-slate-700 ml-1.5 font-bold font-mono">{localPrefix}projects</code>
                   </div>
                 </div>
               </div>
@@ -1268,8 +1266,8 @@ export default function SettingsManager() {
               {/* Import Export Actions Suite */}
               <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-3 text-xs">
                 <div className="space-y-0.5">
-                  <span className="font-bold text-slate-800 text-[11px] block">Backup Vault Controls</span>
-                  <span className="text-[10px] text-slate-450 block">Manually export this workspace's entire ledger as a structured JSON backup file, or migrate values in.</span>
+                  <span className="font-bold text-slate-800 text-[11px] block">Backups</span>
+                  <span className="text-[10px] text-slate-450 block">Export or import the workspace ledger as JSON.</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -1279,7 +1277,7 @@ export default function SettingsManager() {
                     title="Download database dump"
                   >
                     <FileDown size={13} className="text-slate-500" />
-                    <span>Export Ledger JSON</span>
+                    <span>Export JSON</span>
                   </button>
 
                   <div className="relative">
@@ -1295,7 +1293,7 @@ export default function SettingsManager() {
                       className="px-3.5 py-2 hover:bg-slate-50 bg-white border border-slate-205 hover:text-blue-600 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer shrink-0 text-slate-600 text-xs text-center inline-block"
                     >
                       <FileUp size={13} className="text-slate-500 inline mr-1" />
-                      <span>Import Ledger JSON</span>
+                      <span>Import JSON</span>
                     </label>
                   </div>
                 </div>
@@ -1311,20 +1309,20 @@ export default function SettingsManager() {
             <div className="space-y-4 pt-1">
               <div className="bg-blue-50/40 p-4 rounded-xl border border-blue-100 text-[11px] text-blue-800 leading-relaxed space-y-1 max-w-2xl">
                 <p className="font-extrabold flex items-center gap-1">
-                  <Cloud size={12} /> Active Cloud Synchronization
+                  <Cloud size={12} /> Cloud storage
                 </p>
                 <p>
-                  When Cloud REST API Mode is saved, all changes to projects, transactions, and payments will be automatically and non-blockingly dispatched to your REST server path via background sync.
+                  Connect a REST endpoint if you want the workspace to sync outside this browser.
                 </p>
                 <p className="text-slate-500">
-                  You can push your current local sandbox records up to sync files initially, or pull existing records back from the cloud registry.
+                  Use upload or download only when you need to move data between local and cloud storage.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
-                    Cloud Storage REST API Endpoint Port / URL Path
+                    API Endpoint
                   </label>
                   <input
                     type="url"
@@ -1339,7 +1337,7 @@ export default function SettingsManager() {
 
                 <div className="space-y-1.5 pb-2">
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
-                    Cloud Authorization Header Value (Optional Key)
+                    Authorization Header
                   </label>
                   <input
                     type="text"
@@ -1355,8 +1353,8 @@ export default function SettingsManager() {
               {/* Sync controls action bar */}
               <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
                 <div className="space-y-0.5">
-                  <span className="font-bold text-slate-800 text-[11px] block">Sync Operations Console</span>
-                  <span className="text-[10px] text-slate-450 block">Manually resolve records or check standard connectivity parameters.</span>
+                  <span className="font-bold text-slate-800 text-[11px] block">Sync Actions</span>
+                  <span className="text-[10px] text-slate-450 block">Test the connection or move data between local and cloud storage.</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -1365,27 +1363,27 @@ export default function SettingsManager() {
                     className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-650 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer border-none text-xs"
                   >
                     <RefreshCw size={12} className="animate-spin-slow" />
-                    <span>Ping Endpoint</span>
+                    <span>Test Connection</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={handlePushToCloud}
                     className="px-3.5 py-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer border-none text-xs"
-                    title="Upload local state to Cloud API path"
+                    title="Upload local data"
                   >
                     <UploadCloud size={13} />
-                    <span>Push Sandbox to Cloud</span>
+                    <span>Upload Local Data</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={handlePullFromCloud}
                     className="px-3.5 py-2 bg-slate-900 hover:bg-slate-850 text-white rounded-xl font-bold transition flex items-center gap-1 cursor-pointer border-none text-xs"
-                    title="Download Cloud state into Local Sandbox"
+                    title="Download cloud data into local storage"
                   >
                     <DownloadCloud size={13} />
-                    <span>Pull Cloud to Sandbox</span>
+                    <span>Download Cloud Data</span>
                   </button>
                 </div>
               </div>
@@ -1404,13 +1402,13 @@ export default function SettingsManager() {
             </div>
           )}
 
-          <div className="pt-4 border-t flex justify-end gap-3">
+          <div className="hidden pt-4 border-t justify-end gap-3">
             <button
               type="submit"
               className="bg-blue-600 hover:bg-blue-550 text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer border-none shadow-sm"
             >
               <Save size={13} />
-              <span>Apply Storage Infrastructure Settings</span>
+              <span>Save Storage Settings</span>
             </button>
           </div>
         </form>

@@ -122,7 +122,7 @@ export default function Logo({
             y="20"
             width="160"
             height="160"
-            fill="#adb8be"
+            fill="#cce0ff"
           />
           
           {/* The tilted blueprint/capsule container */}
@@ -145,7 +145,7 @@ export default function Logo({
               y="80"
               width="48"
               height="12"
-              fill="#016fca"
+              fill="#007acc"
             />
 
             {/* Middle light gray-blue stripe */}
@@ -154,7 +154,7 @@ export default function Logo({
               y="92"
               width="48"
               height="16"
-              fill="#a5b5bd"
+              fill="#66a3ff"
             />
 
             {/* Bottom blue stripe */}
@@ -163,7 +163,7 @@ export default function Logo({
               y="108"
               width="48"
               height="12"
-              fill="#016fca"
+              fill="#007acc"
             />
 
             {/* Bottom-left endcap: solid royal blue circle */}
@@ -171,7 +171,7 @@ export default function Logo({
               cx="76"
               cy="100"
               r="20"
-              fill="#016fca"
+              fill="#007acc"
             />
           </g>
         </svg>
@@ -194,15 +194,15 @@ export default function Logo({
   const renderText = (alignClass: 'items-start text-left' | 'items-center text-center') => (
     <div className={`flex flex-col ${alignClass} font-sans`}>
       <div className={`font-extrabold tracking-tight leading-none ${textSizes[size]} flex items-center select-none`}>
-        <span style={{ color: '#016fca' }}>CATALY</span>
-        <span style={{ color: '#435866' }}>S</span>
-        <span style={{ color: '#016fca' }}>ER</span>
+        <span style={{ color: '#007acc' }}>CATALY</span>
+        <span style={{ color: '#003366' }}>S</span>
+        <span style={{ color: '#007acc' }}>ER</span>
       </div>
       {showSubtitle && (
         <span 
           className="font-bold tracking-[0.45em] uppercase" 
           style={{ 
-            color: '#8c9ea7', 
+            color: '#66a3ff', 
             fontSize: size === 'sm' ? '8px' : size === 'md' ? '11px' : size === 'lg' ? '16px' : '20px',
             marginTop: '3px',
             marginRight: '-0.45em' // compensate for tracking trailing spacing

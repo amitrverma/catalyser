@@ -39,3 +39,20 @@ export function formatDate(dateStr: string | undefined | null): string {
   
   return trimmed;
 }
+
+const inrFormatter = new Intl.NumberFormat('en-IN', {
+  style: 'currency',
+  currency: 'INR',
+  maximumFractionDigits: 0,
+});
+
+export function formatCurrency(amount: number | undefined | null): string {
+  return inrFormatter.format(amount || 0);
+}
+
+export function formatCompactNumber(amount: number | undefined | null): string {
+  return new Intl.NumberFormat('en-IN', {
+    maximumFractionDigits: 1,
+    notation: 'compact',
+  }).format(amount || 0);
+}

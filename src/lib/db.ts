@@ -157,48 +157,11 @@ const INITIAL_PAYMENTS: Payment[] = [
   }
 ];
 
-const INITIAL_DOCUMENTS: CloudDocument[] = [
-  {
-    id: 'doc-1',
-    projectId: 'proj-1',
-    name: 'villa_elixir_floorplan_v3.pdf',
-    category: 'blueprint',
-    size: 4500000, // 4.5 MB
-    uploadedAt: '2026-03-13',
-    syncStatus: 'synced',
-    fileType: 'application/pdf'
-  },
-  {
-    id: 'doc-2',
-    projectId: 'proj-1',
-    name: 'structural_timber_estimate.xlsx',
-    category: 'estimate',
-    size: 2100000,
-    uploadedAt: '2026-04-10',
-    syncStatus: 'synced',
-    fileType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  },
-  {
-    id: 'doc-3',
-    projectId: 'proj-2',
-    name: 'kitchen_island_marble_receipt.pdf',
-    category: 'receipt',
-    size: 320000,
-    uploadedAt: '2026-01-26',
-    syncStatus: 'synced',
-    fileType: 'application/pdf'
-  },
-  {
-    id: 'doc-4',
-    projectId: 'proj-2',
-    name: 'vance_penthouse_signed_contract.pdf',
-    category: 'contract',
-    size: 1500000,
-    uploadedAt: '2026-01-06',
-    syncStatus: 'synced',
-    fileType: 'application/pdf'
-  }
-];
+const INITIAL_DOCUMENTS: CloudDocument[] = [];
+
+function hasDocumentPayload(document: CloudDocument) {
+  return document.syncStatus !== 'synced' || Boolean(document.storagePath || document.dataUrl);
+}
 
 export function getLocalDbData(): DbData {
   const prefix = localStorage.getItem('cc_storage_local_prefix') || 'cc_';
@@ -222,7 +185,7 @@ export function getLocalDbData(): DbData {
     projects: JSON.parse(localStorage.getItem(projectsKey) || JSON.stringify(INITIAL_PROJECTS)) as Project[],
     payments: JSON.parse(localStorage.getItem(paymentsKey) || JSON.stringify(INITIAL_PAYMENTS)) as Payment[],
     contacts: JSON.parse(localStorage.getItem(contactsKey) || JSON.stringify(INITIAL_CONTACTS)) as Contact[],
-    documents: JSON.parse(localStorage.getItem(documentsKey) || JSON.stringify(INITIAL_DOCUMENTS)) as CloudDocument[],
+    documents: (JSON.parse(localStorage.getItem(documentsKey) || JSON.stringify(INITIAL_DOCUMENTS)) as CloudDocument[]).filter(hasDocumentPayload),
   };
 }
 
@@ -292,18 +255,20 @@ export async function getDbData(): Promise<DbData> {
         gstNumber: row.gst_number || undefined,
         address: row.address || undefined,
       })),
-      documents: ((documentsResult.data || []) as DocumentRow[]).map((row) => ({
-        id: row.id,
-        projectId: row.project_id,
-        name: row.name,
-        category: row.category,
-        size: Number(row.size || 0),
-        uploadedAt: row.uploaded_at,
-        syncStatus: row.sync_status,
-        fileType: row.file_type,
-        dataUrl: row.data_url || undefined,
-        storagePath: row.storage_path || undefined,
-      })),
+      documents: ((documentsResult.data || []) as DocumentRow[])
+        .map((row) => ({
+          id: row.id,
+          projectId: row.project_id,
+          name: row.name,
+          category: row.category,
+          size: Number(row.size || 0),
+          uploadedAt: row.uploaded_at,
+          syncStatus: row.sync_status,
+          fileType: row.file_type,
+          dataUrl: row.data_url || undefined,
+          storagePath: row.storage_path || undefined,
+        }))
+        .filter(hasDocumentPayload),
     };
 
     if (

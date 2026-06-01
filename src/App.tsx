@@ -15,7 +15,6 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { hydrateSettingsFromSupabase, installSettingsPersistence, persistSettingsToSupabase } from './lib/settingsSync';
 import { createWorkspaceFileUrl, uploadWorkspaceFile } from './lib/fileStorage';
 import { ensureActiveOrganization } from './lib/orgs';
-import { formatDate } from './lib/formatter';
 import Logo from './components/Logo';
 import Dashboard from './components/Dashboard';
 import ProjectList from './components/ProjectList';
@@ -24,14 +23,45 @@ import ContactManager from './components/ContactManager';
 import ReportGenerator from './components/ReportGenerator';
 import PartyLedgerStandalone from './components/PartyLedgerStandalone';
 import SettingsManager from './components/SettingsManager';
-import { LayoutDashboard, FolderKanban, Users, ShieldAlert, FileSpreadsheet, Settings, LogOut } from 'lucide-react';
+import {
+  LayoutDashboard,
+  FolderKanban,
+  Users,
+  ShieldAlert,
+  FileSpreadsheet,
+  Settings,
+  LogOut,
+  Search,
+  UserCircle,
+  Building2,
+} from 'lucide-react';
+
+type HomeTab = 'dashboard' | 'projects' | 'contacts' | 'reports' | 'settings';
+
+const routeTabs: HomeTab[] = ['dashboard', 'projects', 'contacts', 'reports', 'settings'];
+
+function routeFromPath(pathname: string): { homeTab: HomeTab; selectedProjectId: string | null } {
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments[0] === 'projects' && segments[1]) {
+    return { homeTab: 'projects', selectedProjectId: decodeURIComponent(segments[1]) };
+  }
+  if (segments[0] && routeTabs.includes(segments[0] as HomeTab)) {
+    return { homeTab: segments[0] as HomeTab, selectedProjectId: null };
+  }
+  return { homeTab: 'projects', selectedProjectId: null };
+}
+
+function pathForTab(tab: HomeTab): string {
+  return tab === 'projects' ? '/projects' : `/${tab}`;
+}
 
 export default function App() {
   const [db, setDb] = useState<DbData | null>(null);
 
   // View state controllers
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [homeTab, setHomeTab] = useState<'dashboard' | 'projects' | 'contacts' | 'reports' | 'settings'>('projects');
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => routeFromPath(window.location.pathname).selectedProjectId);
+  const [homeTab, setHomeTab] = useState<HomeTab>(() => routeFromPath(window.location.pathname).homeTab);
+  const [globalSearch, setGlobalSearch] = useState('');
   
   // State for recording deletion confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<{
@@ -63,6 +93,12 @@ export default function App() {
       setStandalonePartyName(params.get('partyName'));
     }
 
+    const handleRouteChange = () => {
+      const route = routeFromPath(window.location.pathname);
+      setHomeTab(route.homeTab);
+      setSelectedProjectId(route.selectedProjectId);
+    };
+
     // Dynamic storage listener to keep different tabs instantly synced
     const handleStorageSync = async () => {
       const data = await getDbData();
@@ -76,12 +112,14 @@ export default function App() {
     window.addEventListener('storage', handleStorageSync);
     window.addEventListener('custom-db-updated', handleStorageSync);
     window.addEventListener('custom-settings-updated', handleSettingsSync);
+    window.addEventListener('popstate', handleRouteChange);
 
     return () => {
       mounted = false;
       window.removeEventListener('storage', handleStorageSync);
       window.removeEventListener('custom-db-updated', handleStorageSync);
       window.removeEventListener('custom-settings-updated', handleSettingsSync);
+      window.removeEventListener('popstate', handleRouteChange);
     };
   }, []);
 
@@ -328,7 +366,7 @@ export default function App() {
     setDeleteConfirm({
       isOpen: true,
       title: 'Confirm File Deletion',
-      message: 'Are you sure you want to permanently remove this blueprint file record from the Catalyser Cloud Locker?',
+      message: 'Are you sure you want to permanently remove this document record?',
       onConfirm: () => {
         const updated = {
           ...db,
@@ -344,42 +382,194 @@ export default function App() {
     return <PartyLedgerStandalone partyName={standalonePartyName} />;
   }
 
+  const navItems = [
+    { id: 'projects' as const, label: 'Projects', icon: FolderKanban },
+    { id: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'contacts' as const, label: 'Contacts', icon: Users },
+    { id: 'reports' as const, label: 'Reports', icon: FileSpreadsheet },
+    { id: 'settings' as const, label: 'Settings', icon: Settings },
+  ];
+
+  const pageTitle = activeProject
+    ? activeProject.name
+    : navItems.find((item) => item.id === homeTab)?.label || 'Projects';
+  const pageSubtitle = activeProject
+    ? `${activeProject.clientName} - ${activeProject.address || 'Project ledger'}`
+    : 'Architecture and interior design operations workspace';
+  const normalizedSearch = globalSearch.trim().toLowerCase();
+  const searchMatches = normalizedSearch
+    ? [
+        ...db.projects
+          .filter((project) =>
+            [project.name, project.clientName, project.address, project.description].some((value) =>
+              (value || '').toLowerCase().includes(normalizedSearch),
+            ),
+          )
+          .slice(0, 4)
+          .map((project) => ({
+            id: project.id,
+            type: 'Project',
+            title: project.name,
+            subtitle: project.clientName,
+            onClick: () => navigateToProject(project.id),
+          })),
+        ...db.contacts
+          .filter((contact) =>
+            [contact.name, contact.company, contact.email, contact.phone].some((value) =>
+              (value || '').toLowerCase().includes(normalizedSearch),
+            ),
+          )
+          .slice(0, 4)
+          .map((contact) => ({
+            id: contact.id,
+            type: 'Contact',
+            title: contact.name,
+            subtitle: contact.company || contact.role,
+            onClick: () => navigateToTab('contacts'),
+          })),
+        ...db.documents
+          .filter((document) => document.name.toLowerCase().includes(normalizedSearch))
+          .slice(0, 4)
+          .map((document) => ({
+            id: document.id,
+            type: 'Document',
+            title: document.name,
+            subtitle: document.category,
+            onClick: () => navigateToTab('projects'),
+          })),
+      ].slice(0, 8)
+    : [];
+
+  const navigateToTab = (tab: HomeTab) => {
+    const path = pathForTab(tab);
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+    setSelectedProjectId(null);
+    setHomeTab(tab);
+  };
+
+  const navigateToProject = (projectId: string) => {
+    const path = `/projects/${encodeURIComponent(projectId)}`;
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+    setSelectedProjectId(projectId);
+    setHomeTab('projects');
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans" id="app-viewport">
-      {/* Prime Header Bar */}
-      <header className="bg-slate-900 sticky top-0 z-40 px-5 py-4.5 shadow-md text-white border-b border-slate-800">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-3">
-          {/* Logo and company branding */}
-          <div className="cursor-pointer" onClick={() => setSelectedProjectId(null)}>
-            <Logo layout="row" size="sm" showSubtitle={true} onDark={true} allowChange={false} />
-          </div>
-
-          {/* Quick status diagnostic indicator lines - architectural simplicity */}
-          <div className="flex items-center gap-4 text-xs font-semibold">
-            <div className="flex items-center gap-2 bg-slate-800 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700">
-              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-              <span>{isSupabaseConfigured ? 'Supabase Sync Active' : 'Local Mode Active'}</span>
-            </div>
-            {isSupabaseConfigured && supabase && (
-              <button
-                onClick={() => void supabase.auth.signOut()}
-                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 cursor-pointer"
-                title="Sign out"
-              >
-                <LogOut size={14} />
-                <span>Sign Out</span>
-              </button>
-            )}
-            
-            <div className="text-[11px] text-slate-400 font-mono hidden md:block">
-              Device Date: <span className="text-blue-600 font-bold">{new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}</span>
+    <div className="min-h-screen bg-slate-100 font-sans text-slate-900" id="app-viewport">
+      <div className="flex min-h-screen">
+        <aside className="hidden md:flex md:w-64 lg:w-72 shrink-0 flex-col border-r border-slate-950 bg-slate-950 text-slate-100" id="desktop-sidebar">
+          <div className="border-b border-white/10 p-3 pt-6">
+            <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+              <Building2 size={14} className="text-slate-400" />
+              <span className="truncate font-semibold">Default Workspace</span>
             </div>
           </div>
-        </div>
-      </header>
 
-      {/* Main Container body spacer */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 pb-28" id="main-content-canvas">
+          <nav className="flex-1 space-y-1 p-3" aria-label="Primary navigation">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = !activeProject && homeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    navigateToTab(item.id);
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition cursor-pointer border-none ${
+                    isActive
+                      ? 'bg-white text-slate-950 shadow-sm'
+                      : 'bg-transparent text-slate-400 hover:bg-white/7 hover:text-white'
+                  }`}
+                >
+                  <Icon size={18} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 px-4 py-3 shadow-xs backdrop-blur md:px-6" id="workspace-header">
+            <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => navigateToTab('projects')}
+                  className="shrink-0 border-none bg-transparent p-0 text-left cursor-pointer"
+                >
+                  <Logo layout="row" size="sm" showSubtitle={true} onDark={false} allowChange={false} />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 md:gap-3">
+                <div className="relative hidden lg:block">
+                  <div className="flex h-9 w-80 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-500">
+                    <Search size={15} className="shrink-0" />
+                    <input
+                      type="search"
+                      value={globalSearch}
+                      onChange={(event) => setGlobalSearch(event.target.value)}
+                      placeholder="Search projects, contacts, documents"
+                      className="min-w-0 flex-1 border-none bg-transparent p-0 text-sm text-slate-800 placeholder:text-slate-400 focus:shadow-none focus:outline-none"
+                    />
+                  </div>
+                  {normalizedSearch && (
+                    <div className="absolute right-0 top-11 z-50 w-96 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+                      {searchMatches.length > 0 ? (
+                        <div className="py-1">
+                          {searchMatches.map((match) => (
+                            <button
+                              key={`${match.type}-${match.id}`}
+                              type="button"
+                              onClick={() => {
+                                match.onClick();
+                                setGlobalSearch('');
+                              }}
+                              className="flex w-full items-start gap-3 border-none bg-transparent px-3 py-2.5 text-left hover:bg-blue-50 cursor-pointer"
+                            >
+                              <span className="mt-0.5 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold uppercase text-blue-700">
+                                {match.type}
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-semibold text-slate-900">{match.title}</span>
+                                <span className="block truncate text-xs text-slate-500">{match.subtitle}</span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="px-3 py-3 text-sm text-slate-500">No matches found</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {isSupabaseConfigured && supabase ? (
+                  <button
+                    onClick={() => void supabase.auth.signOut()}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    title="Sign out"
+                  >
+                    <LogOut size={15} />
+                    <span className="hidden sm:inline">Sign out</span>
+                  </button>
+                ) : (
+                  <div className="hidden sm:flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600">
+                    <UserCircle size={16} />
+                    <span>Local user</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </header>
+
+          <main className="flex-1 p-4 pb-24 md:p-6 md:pb-8" id="main-content-canvas">
+            <div className="mx-auto max-w-7xl">
         {activeProject ? (
           /* SINGLE PROJECT INDEPTH LEDGER, BILLING, AND DOCUMENTS VIEW */
           <ProjectDetail
@@ -388,7 +578,7 @@ export default function App() {
             payments={db.payments}
             contacts={db.contacts}
             documents={db.documents}
-            onBack={() => setSelectedProjectId(null)}
+            onBack={() => navigateToTab('projects')}
             onAddPayment={handleAddPayment}
             onDeletePayment={handleDeletePayment}
             onEditPayment={handleEditPayment}
@@ -405,28 +595,18 @@ export default function App() {
             <div className="animate-in fade-in duration-150">
               {homeTab === 'projects' && (
                 <div className="space-y-6">
-                  {/* Visual logo banner explicitly placed at Home Screen as requested:
-                      "At home screen, there must be the logo with add project options along with the list of added project."
-                  */}
-                  <div className="bg-white border rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6" id="home-hero-banner">
-                    <Logo layout="row" size="md" showSubtitle={true} onDark={false} allowChange={true} />
-                    <div className="text-center md:text-right max-w-sm space-y-2">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-[#016fca] bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100 font-sans">
-                        Catalyser Design
-                      </span>
-                      <h3 className="text-base font-extrabold text-slate-800">Interior &amp; Architecture Ledger Studio</h3>
-                      <p className="text-xs text-slate-500 leading-relaxed">
-                        Rapid on-site expense logs, real-time client billing, structural blueprints backup, and automatic schedule self-employed tax deductions.
-                      </p>
-                    </div>
+                  <div className="bg-slate-950 text-white p-6 rounded-2xl shadow-md">
+                    <h2 className="text-2xl font-bold tracking-tight">Projects</h2>
+                    <p className="text-slate-200 text-sm mt-1">
+                      Manage project budgets, client ledgers, payments, and documents.
+                    </p>
                   </div>
-
                   <ProjectList
                     projects={db.projects}
                     payments={db.payments}
                     onAddProject={handleAddProject}
                     onUpdateStatus={handleUpdateStatus}
-                    onSelectProject={setSelectedProjectId}
+                    onSelectProject={navigateToProject}
                   />
                 </div>
               )}
@@ -437,18 +617,15 @@ export default function App() {
                   payments={db.payments}
                   contacts={db.contacts}
                   documents={db.documents}
-                  onSelectProject={(id) => {
-                    setSelectedProjectId(id);
-                    setHomeTab('projects');
-                  }}
+                  onSelectProject={navigateToProject}
                 />
               )}
 
               {homeTab === 'contacts' && (
                 <div className="space-y-4">
-                  <div className="bg-white p-5 rounded-2xl border border-slate-120 text-left">
-                    <h3 className="font-bold text-slate-800 text-base">Global Directory Vault</h3>
-                    <p className="text-xs text-[#456276]">Consolidated profile ledger for clients, contracting vendors, and supplier partners</p>
+                  <div className="bg-slate-950 text-white p-6 rounded-2xl shadow-md text-left">
+                    <h2 className="text-2xl font-bold tracking-tight">Contacts</h2>
+                    <p className="text-slate-200 text-sm mt-1">Clients, vendors, and suppliers used across project ledgers.</p>
                   </div>
                   <ContactManager
                     contacts={db.contacts}
@@ -462,9 +639,9 @@ export default function App() {
 
               {homeTab === 'reports' && (
                 <div className="space-y-4">
-                  <div className="bg-white p-5 rounded-2xl border border-slate-120 text-left">
-                    <h3 className="font-bold text-slate-800 text-base">Statement Report Studio</h3>
-                    <p className="text-xs text-[#456276]">Generate real-time audited financial reports, filter by projects, clients or contracting vendors, and export in PDF or Excel sheets.</p>
+                  <div className="bg-slate-950 text-white p-6 rounded-2xl shadow-md text-left">
+                    <h2 className="text-2xl font-bold tracking-tight">Reports</h2>
+                    <p className="text-slate-200 text-sm mt-1">Generate financial statements by project, client, vendor, or fiscal period.</p>
                   </div>
                   <ReportGenerator
                     projects={db.projects}
@@ -474,77 +651,42 @@ export default function App() {
               )}
 
               {homeTab === 'settings' && (
-                <SettingsManager />
+                <div className="space-y-4">
+                  <div className="bg-slate-950 text-white p-6 rounded-2xl shadow-md text-left">
+                    <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
+                    <p className="text-slate-200 text-sm mt-1">Configure company details, billing assets, staff, and backups.</p>
+                  </div>
+                  <SettingsManager />
+                </div>
               )}
             </div>
           </div>
         )}
-      </main>
+            </div>
+          </main>
+        </div>
+      </div>
 
-      {/* Persistent Bottom Responsive Floating Dock - Beautiful across all screen viewports! */}
-      <nav className="fixed bottom-0 inset-x-0 md:bottom-6 md:inset-x-auto md:left-1/2 md:-translate-x-1/2 bg-white/95 backdrop-blur-md border-t md:border border-slate-200/80 p-2.5 flex justify-around md:justify-center md:gap-14 items-center z-45 shadow-lg md:rounded-full md:px-12 md:max-w-xl md:w-full" id="system-navbar">
-        <button
-          onClick={() => {
-            setSelectedProjectId(null);
-            setHomeTab('projects');
-          }}
-          className={`flex flex-col items-center gap-1 p-1 text-[10px] font-bold transition duration-150 cursor-pointer ${
-            !selectedProjectId && homeTab === 'projects' ? 'text-[#016fca]' : 'text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <FolderKanban size={18} />
-          <span>Portfolios</span>
-        </button>
-        <button
-          onClick={() => {
-            setSelectedProjectId(null);
-            setHomeTab('dashboard');
-          }}
-          className={`flex flex-col items-center gap-1 p-1 text-[10px] font-bold transition duration-150 cursor-pointer ${
-            !selectedProjectId && homeTab === 'dashboard' ? 'text-[#016fca]' : 'text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <LayoutDashboard size={18} />
-          <span>Analytics</span>
-        </button>
-        <button
-          onClick={() => {
-            setSelectedProjectId(null);
-            setHomeTab('contacts');
-          }}
-          className={`flex flex-col items-center gap-1 p-1 text-[10px] font-bold transition duration-150 cursor-pointer ${
-            !selectedProjectId && homeTab === 'contacts' ? 'text-[#016fca]' : 'text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <Users size={18} />
-          <span>Directory</span>
-        </button>
-        <button
-          onClick={() => {
-            setSelectedProjectId(null);
-            setHomeTab('reports');
-          }}
-          className={`flex flex-col items-center gap-1 p-1 text-[10px] font-bold transition duration-150 cursor-pointer ${
-            !selectedProjectId && homeTab === 'reports' ? 'text-[#016fca]' : 'text-slate-400 hover:text-slate-600'
-          }`}
-          id="mobile-nav-reports"
-        >
-          <FileSpreadsheet size={18} />
-          <span>Statements</span>
-        </button>
-        <button
-          onClick={() => {
-            setSelectedProjectId(null);
-            setHomeTab('settings');
-          }}
-          className={`flex flex-col items-center gap-1 p-1 text-[10px] font-bold transition duration-150 cursor-pointer ${
-            !selectedProjectId && homeTab === 'settings' ? 'text-[#016fca]' : 'text-slate-400 hover:text-slate-600'
-          }`}
-          id="mobile-nav-settings"
-        >
-          <Settings size={18} />
-          <span>Settings</span>
-        </button>
+      <nav className="fixed bottom-0 inset-x-0 z-40 grid grid-cols-5 border-t border-slate-200 bg-white/95 px-2 py-2 shadow-lg backdrop-blur md:hidden" id="system-navbar">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = !activeProject && homeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => {
+                navigateToTab(item.id);
+              }}
+              className={`flex flex-col items-center gap-1 rounded-lg p-1.5 text-[10px] font-bold transition cursor-pointer border-none ${
+                isActive ? 'bg-blue-50 text-blue-700' : 'bg-transparent text-slate-400 hover:text-slate-600'
+              }`}
+              id={item.id === 'reports' ? 'mobile-nav-reports' : item.id === 'settings' ? 'mobile-nav-settings' : undefined}
+            >
+              <Icon size={18} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
       </nav>
 
       {/* Reusable Alert Deletion Confirmation Modal */}

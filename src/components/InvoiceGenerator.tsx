@@ -384,88 +384,92 @@ Thank you for your business. Please let us know if you need any adjustments or b
 
           <div className="pt-2 flex flex-col gap-2">
             <button
-              onClick={() => setShowPreview(!showPreview)}
-              className="w-full bg-slate-100 hover:bg-slate-200 text-[#456276] font-extrabold text-xs py-2 rounded-xl border border-slate-200 flex items-center justify-center gap-1.5 cursor-pointer"
+              onClick={() => setShowPreview(true)}
+              className="w-full bg-blue-50 hover:bg-blue-100 text-[#00509e] font-extrabold text-xs py-2 rounded-xl border border-blue-100 flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Eye size={14} />
-              {showPreview ? 'Hide Invoice Print Sheet' : 'Draft Invoicing Preview'}
+              Preview invoice
             </button>
           </div>
         </div>
       </div>
 
-      {/* Actual High-Fidelity Print Sheet preview */}
+      {/* Invoice preview modal */}
       {showPreview && (
-        <div className="space-y-5">
-          {/* Responsive action utility hub (disabled under printing automatically) */}
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl text-left flex flex-col gap-4 print:hidden shadow-xs">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div className="space-y-1">
-                <span className="text-[9px] uppercase font-bold text-blue-400 tracking-widest font-mono block">Invoicing Utilities Workspace</span>
-                <h4 className="text-sm font-black text-white">Interactive Document Hub</h4>
-                <p className="text-[11px] text-slate-400 max-w-lg leading-relaxed">
-                  Export high-fidelity statement PDFs, dispatch client soft-copy emails, or coordinate billing balances directly over WhatsApp.
-                </p>
-              </div>
-              
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={triggerPrint}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm transition border-none"
-                >
-                  <Printer size={14} /> Print / Save PDF
-                </button>
-                
-                <button
-                  onClick={handleShareWhatsApp}
-                  className="bg-emerald-600 hover:bg-emerald-550 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm transition border-none"
-                >
-                  <MessageSquare size={14} /> WhatsApp Share
-                </button>
-                
-                <button
-                  onClick={handleSendEmail}
-                  className="bg-[#456276] hover:bg-slate-700 text-white font-extrabold text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer transition border-none"
-                >
-                  <Send size={14} /> Mail to Client
-                </button>
+        <div className="fixed inset-0 z-[90] overflow-y-auto bg-[#003366]/75 p-3 backdrop-blur-sm md:p-6 print:static print:bg-transparent print:p-0">
+          <div className="mx-auto max-w-6xl">
+            <div className="sticky top-0 z-10 mb-4 rounded-xl border border-[#cce0ff] bg-white shadow-xl print:hidden">
+              <div className="flex flex-col gap-3 p-3 md:flex-row md:items-center md:justify-between md:px-4">
+                <div className="min-w-0">
+                  <h3 className="truncate text-base font-extrabold text-[#003366]">Invoice preview</h3>
+                  <p className="truncate text-xs font-semibold text-slate-500">{project.name} - {invoiceNumber}</p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={triggerPrint}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#00509e] px-3.5 text-xs font-extrabold text-white shadow-sm transition hover:bg-[#003366] cursor-pointer"
+                  >
+                    <Printer size={15} />
+                    Print / Save PDF
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleShareWhatsApp}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cce0ff] bg-[#eef6ff] px-3.5 text-xs font-extrabold text-[#00509e] transition hover:bg-[#cce0ff] cursor-pointer"
+                  >
+                    <MessageSquare size={15} />
+                    WhatsApp
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSendEmail}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cce0ff] bg-white px-3.5 text-xs font-extrabold text-[#00509e] transition hover:bg-[#eef6ff] cursor-pointer"
+                  >
+                    <Send size={15} />
+                    Mail
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowPreview(false)}
+                    className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
+                    aria-label="Close invoice preview"
+                  >
+                    <X size={17} />
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* Sandbox iframe warning label */}
-            <div className="pt-3.5 border-t border-slate-800 text-[10.5px] text-amber-200/90 font-medium flex gap-2 items-start leading-relaxed">
-              <span className="text-xs shrink-0">💡</span>
-              <p>
-                <b>Print Sandbox Notice:</b> Due to secure iframe browser rules inside development previews, standard printing functions may draw browser warning blocks.
-                If clicking <b>"Print / Save PDF"</b> does not open your printer dialog, click the <b>"Open in New Tab"</b> button at the top-right of the window to print or export as native PDF!
-              </p>
-            </div>
-          </div>
-
+        <div className="space-y-3">
           {/* Email confirmation toast notification */}
           {sentStatus && (
-            <div className="bg-emerald-50 border border-emerald-250 p-4 rounded-xl text-emerald-800 text-xs text-left font-bold flex items-center gap-2.5 print:hidden animate-in fade-in duration-200 shadow-2xs">
+            <div className="bg-emerald-50 border border-emerald-250 px-4 py-3 rounded-xl text-emerald-800 text-xs text-left font-bold flex items-center gap-2.5 print:hidden animate-in fade-in duration-200 shadow-2xs">
               <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
-              <span>Invoice document successfully compiled &amp; scheduled to client: <b>{project.clientName}</b>.</span>
+              <span>Invoice queued for <b>{project.clientName}</b>.</span>
             </div>
           )}
 
           {/* WhatsApp confirmation toast notification */}
           {whatsappStatus && (
-            <div className="bg-emerald-50 border border-emerald-250 p-4 rounded-xl text-emerald-800 text-xs text-left font-bold flex items-center gap-2.5 print:hidden animate-in fade-in duration-200 shadow-2xs">
+            <div className="bg-emerald-50 border border-emerald-250 px-4 py-3 rounded-xl text-emerald-800 text-xs text-left font-bold flex items-center gap-2.5 print:hidden animate-in fade-in duration-200 shadow-2xs">
               <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
               <span>
-                <b>WhatsApp Chat Dispatched!</b> A clean text summary statement has also been copied to your clipboard. You can paste (Ctrl+V) directly if browser popups prevent the chat redirect.
+                WhatsApp summary copied and ready to send.
               </span>
             </div>
           )}
 
-          <div className="bg-white border rounded-2xl p-8 relative space-y-6 mx-auto max-w-4xl print-target" id="invoice-print-sheet">
+          <div className="bg-white border border-[#cce0ff] rounded-xl p-6 md:p-8 relative space-y-6 mx-auto max-w-4xl shadow-2xl print-target" id="invoice-print-sheet">
             {/* Invoice Header */}
           <div className="flex flex-col sm:flex-row justify-between items-start gap-4 border-b pb-6 text-left">
             <Logo layout="row" size="sm" showSubtitle={true} />
             <div className="text-right sm:text-right text-xs">
-              <h2 className="text-xl font-black text-[#456276] uppercase tracking-wide">
+              <h2 className="text-xl font-black text-[#003366] uppercase tracking-wide">
                 {invoiceType === 'tax' ? 'Tax Invoice' : 'Proforma Invoice'}
               </h2>
               <span className="text-slate-400 block mt-1">Ref #: {invoiceNumber}</span>
@@ -500,7 +504,7 @@ Thank you for your business. Please let us know if you need any adjustments or b
                   </span>
                 </div>
                 <div>
-                  <span className="text-[#456276] font-bold uppercase tracking-wider block mb-1">Bill To Client</span>
+                  <span className="text-[#00509e] font-bold uppercase tracking-wider block mb-1">Bill To Client</span>
                   <span className="font-extrabold text-slate-800 block">{project.clientName}</span>
                   {clientAddress && (
                     <span className="text-slate-400 block mt-0.5 whitespace-pre-wrap">{clientAddress}</span>
@@ -603,7 +607,7 @@ Thank you for your business. Please let us know if you need any adjustments or b
 
                 <div className="bg-slate-50/75 p-4 rounded-xl border border-slate-100 text-[10px] text-slate-400 leading-relaxed flex flex-col justify-between">
                   <div>
-                    <span className="font-bold text-[#456276] uppercase tracking-wider block mb-1.5">Invoice Terms &amp; Instructions</span>
+                    <span className="font-bold text-[#00509e] uppercase tracking-wider block mb-1.5">Invoice Terms &amp; Instructions</span>
                     <p>{terms}</p>
                   </div>
 
@@ -675,6 +679,8 @@ Thank you for your business. Please let us know if you need any adjustments or b
               </div>
             );
           })()}
+          </div>
+        </div>
           </div>
         </div>
       )}

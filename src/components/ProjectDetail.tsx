@@ -990,7 +990,7 @@ export default function ProjectDetail({
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2.5 bg-[#456276] hover:bg-slate-700 text-white rounded-xl cursor-pointer transition shadow-xs"
+                    className="px-4 py-2.5 bg-[#00509e] hover:bg-[#007acc] text-white rounded-xl cursor-pointer transition shadow-xs"
                   >
                     Save Changes
                   </button>

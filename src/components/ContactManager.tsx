@@ -28,6 +28,7 @@ export default function ContactManager({
   const [address, setAddress] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(contacts[0]?.id || null);
   const [selectedContactForLedger, setSelectedContactForLedger] = useState<Contact | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -54,6 +55,13 @@ export default function ContactManager({
     if (roleFilter === 'all') return matchesSearch;
     return matchesSearch && c.role === roleFilter;
   });
+  const selectedContact = filteredContacts.find((contact) => contact.id === selectedContactId) || filteredContacts[0] || null;
+  const roleCounts = {
+    all: contacts.length,
+    client: contacts.filter((contact) => contact.role === 'client').length,
+    vendor: contacts.filter((contact) => contact.role === 'vendor').length,
+    supplier: contacts.filter((contact) => contact.role === 'supplier').length,
+  };
 
   return (
     <div className="space-y-4" id="contacts-management-tab">
@@ -194,9 +202,90 @@ export default function ContactManager({
         </form>
       )}
 
-      {/* Directory Grid layout */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-left">
-        {filteredContacts.map((c) => {
+      {/* Focused directory layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-left">
+        <aside className="lg:col-span-4 xl:col-span-3 space-y-3">
+          <div className="bg-white rounded-xl border border-slate-150 shadow-xs p-3">
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 'all', label: 'All', count: roleCounts.all },
+                { id: 'client', label: 'Clients', count: roleCounts.client },
+                { id: 'vendor', label: 'Vendors', count: roleCounts.vendor },
+                { id: 'supplier', label: 'Suppliers', count: roleCounts.supplier },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setRoleFilter(item.id);
+                    setSelectedContactId(null);
+                  }}
+                  className={`rounded-lg border px-3 py-2 text-left transition cursor-pointer ${
+                    roleFilter === item.id
+                      ? 'border-[#66a3ff] bg-blue-50 text-[#003366]'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="block text-[10px] font-bold uppercase tracking-wide">{item.label}</span>
+                  <span className="mt-0.5 block text-lg font-black">{item.count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-150 shadow-xs overflow-hidden">
+            <div className="border-b border-slate-100 px-3 py-2.5">
+              <span className="text-xs font-bold text-slate-800">Directory</span>
+              <span className="ml-2 text-[11px] text-slate-400">{filteredContacts.length} shown</span>
+            </div>
+            <div className="max-h-[560px] overflow-y-auto divide-y divide-slate-100">
+              {filteredContacts.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-400">No contacts match your filters.</div>
+              ) : (
+                filteredContacts.map((c) => {
+                  const partyPaymentsCount = payments.filter(
+                    (p) => p.party.trim().toLowerCase() === c.name.trim().toLowerCase()
+                  ).length;
+                  const isSelected = selectedContact?.id === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setSelectedContactId(c.id)}
+                      className={`w-full border-none px-3 py-3 text-left transition cursor-pointer ${
+                        isSelected ? 'bg-blue-50' : 'bg-white hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <span className="block truncate text-sm font-bold text-slate-900">{c.name}</span>
+                          <span className="mt-0.5 block truncate text-xs text-slate-500">{c.company || c.email || c.phone || 'No company details'}</span>
+                        </div>
+                        <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold capitalize ${
+                          c.role === 'client'
+                            ? 'border-blue-100 bg-blue-50 text-[#00509e]'
+                            : c.role === 'vendor'
+                            ? 'border-amber-200 bg-amber-50 text-amber-700'
+                            : 'border-green-200 bg-green-50 text-green-700'
+                        }`}>
+                          {c.role}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+                        <span>{partyPaymentsCount} transaction{partyPaymentsCount !== 1 ? 's' : ''}</span>
+                        <span>{c.phone || c.email ? 'Contactable' : 'Incomplete'}</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </aside>
+
+        <section className="lg:col-span-8 xl:col-span-9">
+          {selectedContact ? (() => {
+            const c = selectedContact;
           let badgeColor = 'bg-blue-50 text-blue-700 border-blue-100';
           let roleTitle = 'Client (Owner)';
           if (c.role === 'vendor') {
@@ -210,82 +299,125 @@ export default function ContactManager({
           const partyPaymentsCount = payments.filter(
             (p) => p.party.trim().toLowerCase() === c.name.trim().toLowerCase()
           ).length;
+          const partyPayments = payments.filter(
+            (p) => p.party.trim().toLowerCase() === c.name.trim().toLowerCase()
+          );
+          const totalIn = partyPayments.filter((p) => p.type === 'in').reduce((sum, p) => sum + p.amount, 0);
+          const totalOut = partyPayments.filter((p) => p.type === 'out').reduce((sum, p) => sum + p.amount, 0);
 
           return (
             <div
-              key={c.id}
-              onClick={() => setSelectedContactForLedger(c)}
-              className="bg-white p-4 rounded-xl border border-slate-150 hover:border-blue-300 transition-all duration-150 flex flex-col justify-between space-y-3 cursor-pointer shadow-xs hover:shadow-xs group"
+              className="bg-white rounded-xl border border-slate-150 shadow-xs overflow-hidden"
             >
-              <div>
-                <div className="flex justify-between items-start gap-1">
-                  <div className="flex items-center gap-1.5 font-bold text-sm text-slate-800 group-hover:text-blue-600 transition-colors">
-                    <User size={15} className="text-blue-600" />
-                    <span>{c.name}</span>
+              <div className="p-5 border-b border-slate-100">
+                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                  <div>
+                    <span className={`inline-flex rounded-md border px-2 py-1 text-[10px] font-bold ${badgeColor}`}>
+                      {roleTitle}
+                    </span>
+                    <h3 className="mt-3 text-xl font-black text-slate-950">{c.name}</h3>
+                    <p className="mt-1 text-sm text-slate-500">{c.company || 'No company added'}</p>
                   </div>
-                  <span className={`text-[9.5px] font-bold px-2 py-0.5 rounded-md border ${badgeColor}`}>
-                    {roleTitle}
-                  </span>
-                </div>
-
-                <div className="mt-2.5 space-y-1.5 text-xs text-slate-500">
-                  {c.company && (
-                    <div className="flex items-center gap-2">
-                      <Building2 size={12} className="text-slate-400 shrink-0" />
-                      <span className="truncate">{c.company}</span>
-                    </div>
-                  )}
-                  {c.phone && (
-                    <div className="flex items-center gap-2">
-                      <Phone size={12} className="text-slate-400 shrink-0" />
-                      <span>{c.phone}</span>
-                    </div>
-                  )}
-                  {c.email && (
-                    <div className="flex items-center gap-2">
-                      <Mail size={12} className="text-slate-400 shrink-0" />
-                      <span className="truncate">{c.email}</span>
-                    </div>
-                  )}
-                  {c.gstNumber && (
-                    <div className="flex items-center gap-2 pt-0.5">
-                      <span className="text-[8px] font-extrabold text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded leading-none shrink-0 font-mono">GST</span>
-                      <span className="truncate font-mono font-bold text-slate-600 tracking-tight text-[10.5px] leading-none">{c.gstNumber}</span>
-                    </div>
-                  )}
-                  {c.address && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-[8px] font-extrabold text-slate-500 bg-slate-50 border border-slate-150 px-1 py-0.5 rounded leading-none shrink-0 font-mono">ADR</span>
-                      <span className="truncate text-slate-600 text-[11px] leading-none" title={c.address}>{c.address}</span>
-                    </div>
-                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedContactForLedger(c)}
+                      className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-[#00509e] hover:bg-blue-100 cursor-pointer"
+                    >
+                      View ledger
+                    </button>
+                    {onDeleteContact && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteContact(c.id)}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* Action items */}
-              <div className="border-t border-slate-1-0 pt-2 flex justify-between items-center text-[10px]">
-                <span className="font-semibold text-slate-400 flex items-center gap-1">
-                  <Receipt size={11} className="text-slate-400" />
-                  <span className="group-hover:text-blue-600 font-bold transition-colors">
-                    {partyPaymentsCount} Transaction{partyPaymentsCount !== 1 ? 's' : ''}
-                  </span>
-                </span>
-                {onDeleteContact && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteContact(c.id);
-                    }}
-                    className="text-slate-350 hover:text-rose-600 transition p-1 hover:bg-slate-50 rounded cursor-pointer border-none bg-transparent"
-                    title="Remove contact"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-0">
+                <div className="xl:col-span-1 border-b xl:border-b-0 xl:border-r border-slate-100 p-5 space-y-4">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Contact Details</span>
+                    <div className="mt-3 space-y-3 text-sm">
+                      <div className="flex gap-2 text-slate-700">
+                        <Phone size={15} className="mt-0.5 shrink-0 text-slate-400" />
+                        <span>{c.phone || 'No phone added'}</span>
+                      </div>
+                      <div className="flex gap-2 text-slate-700">
+                        <Mail size={15} className="mt-0.5 shrink-0 text-slate-400" />
+                        <span className="break-all">{c.email || 'No email added'}</span>
+                      </div>
+                      <div className="flex gap-2 text-slate-700">
+                        <Building2 size={15} className="mt-0.5 shrink-0 text-slate-400" />
+                        <span>{c.address || 'No address added'}</span>
+                      </div>
+                    </div>
+                  </div>
+                  {c.gstNumber && (
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                      <span className="block text-[10px] font-bold uppercase tracking-wide text-[#00509e]">GSTIN</span>
+                      <span className="mt-1 block font-mono text-xs font-bold text-slate-800">{c.gstNumber}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="xl:col-span-2 p-5 space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                      <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Transactions</span>
+                      <span className="mt-1 block text-lg font-black text-slate-900">{partyPaymentsCount}</span>
+                    </div>
+                    <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                      <span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-700">Received</span>
+                      <span className="mt-1 block text-lg font-black text-emerald-700">₹{totalIn.toLocaleString()}</span>
+                    </div>
+                    <div className="rounded-lg border border-rose-100 bg-rose-50 p-3">
+                      <span className="block text-[10px] font-bold uppercase tracking-wide text-rose-700">Paid</span>
+                      <span className="mt-1 block text-lg font-black text-rose-700">₹{totalOut.toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-150 overflow-hidden">
+                    <div className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700">
+                      Recent ledger activity
+                    </div>
+                    {partyPayments.length === 0 ? (
+                      <div className="p-8 text-center text-sm text-slate-400">No transactions recorded for this contact.</div>
+                    ) : (
+                      <div className="divide-y divide-slate-100">
+                        {partyPayments.slice(0, 5).map((payment) => {
+                          const project = projects.find((item) => item.id === payment.projectId);
+                          return (
+                            <div key={payment.id} className="grid grid-cols-12 gap-3 px-3 py-3 text-xs">
+                              <div className="col-span-3 font-mono text-slate-500">{formatDate(payment.date)}</div>
+                              <div className="col-span-5 min-w-0">
+                                <span className="block truncate font-semibold text-slate-800">{project?.name || 'Unknown project'}</span>
+                                <span className="block truncate text-slate-400">{payment.remark || 'No remark'}</span>
+                              </div>
+                              <div className={`col-span-4 text-right font-mono font-black ${payment.type === 'in' ? 'text-emerald-700' : 'text-rose-600'}`}>
+                                {payment.type === 'in' ? '+' : '-'}₹{payment.amount.toLocaleString()}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           );
-        })}
+        })() : (
+          <div className="bg-white rounded-xl border border-slate-150 p-12 text-center text-slate-400">
+            Select a contact to view details.
+          </div>
+        )}
+        </section>
       </div>
 
       {/* Dynamic Party Ledger Popup Modal */}
