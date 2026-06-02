@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Project, Payment, Contact, CloudDocument, PaymentType, PaymentMode, DocumentCategory } from '../types';
+import { Project, Payment, Contact, CloudDocument, PaymentType, PaymentMode, DocumentCategory, ContactRole, PartyRole } from '../types';
 import { formatDate } from '../lib/formatter';
+import { PARTY_ROLE_OPTIONS, PAYABLE_CONTACT_ROLES } from '../lib/roleLabels';
 import InvoiceGenerator from './InvoiceGenerator';
 import DocumentManager from './DocumentManager';
 import ContactManager from './ContactManager';
@@ -16,7 +17,9 @@ interface ProjectDetailProps {
   onAddPayment: (payment: Omit<Payment, 'id'>) => void;
   onDeletePayment: (paymentId: string) => void;
   onEditPayment?: (payment: Payment) => void;
-  onAddContact: (name: string, role: 'client' | 'vendor' | 'supplier', phone: string, email: string, company: string) => void;
+  onAddContact: (name: string, role: ContactRole, phone: string, email: string, company: string) => void;
+  onAddContacts?: (contacts: Array<{ name: string; role: ContactRole; phone: string; email: string; company: string }>) => void;
+  onUpdateContactRole?: (contactId: string, role: ContactRole) => void;
   onAddDocument: (file: File, category: DocumentCategory) => void;
   onDeleteDocument: (docId: string) => void;
   onDownloadDocument: (doc: CloudDocument) => void;
@@ -33,6 +36,8 @@ export default function ProjectDetail({
   onDeletePayment,
   onEditPayment,
   onAddContact,
+  onAddContacts,
+  onUpdateContactRole,
   onAddDocument,
   onDeleteDocument,
   onDownloadDocument,
@@ -58,7 +63,7 @@ export default function ProjectDetail({
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [editParty, setEditParty] = useState('');
-  const [editPartyRole, setEditPartyRole] = useState<'client' | 'vendor' | 'supplier' | 'other'>('other');
+  const [editPartyRole, setEditPartyRole] = useState<PartyRole>('other');
   const [editPaymentMode, setEditPaymentMode] = useState<PaymentMode>('bank_transfer');
   const [editRemark, setEditRemark] = useState('');
   const [editDate, setEditDate] = useState('');
@@ -119,7 +124,7 @@ export default function ProjectDetail({
 
     // Party selection resolution (use picked contact or typed string)
     let finalParty = partyInput.trim();
-    let derivedRole: 'client' | 'vendor' | 'supplier' | 'other' = 'other';
+    let derivedRole: PartyRole = 'other';
 
     if (selectedContact) {
       const match = contacts.find((c) => c.id === selectedContact);
@@ -136,7 +141,7 @@ export default function ProjectDetail({
     }
 
     if (!finalParty) {
-      finalParty = payType === 'in' ? 'Client' : 'Supplier/Vendor';
+      finalParty = payType === 'in' ? 'Client' : 'Payee';
     }
 
     // Automatically retrieves the current device date!
@@ -163,11 +168,11 @@ export default function ProjectDetail({
     setShowAddPayment(false);
   };
 
-  // Contacts filter matching their role depending on transaction direction
-  // Receivables/Inflows are typically clients; payables/outflows are vendors or suppliers.
+  // Contacts filter matching their role depending on transaction direction.
+  // Receivables/inflows are typically clients; payables/outflows are external work or supply partners.
   const suggestedContacts = contacts.filter((c) => {
     if (payType === 'in') return c.role === 'client';
-    return c.role === 'vendor' || c.role === 'supplier';
+    return PAYABLE_CONTACT_ROLES.includes(c.role);
   });
 
   return (
@@ -359,7 +364,7 @@ export default function ProjectDetail({
                     <div className="space-y-2.5">
                       <div className="flex justify-between items-center">
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                          {payType === 'in' ? 'Received From (Client)' : 'Given To (Vendor / Supplier)'} *
+                          {payType === 'in' ? 'Received From (Client)' : 'Given To (Vendor / Supplier / Contractor / Site Worker)'} *
                         </label>
                         <span className="text-[9px] text-blue-650 font-semibold">Pre-registered partners list</span>
                       </div>
@@ -391,7 +396,7 @@ export default function ProjectDetail({
                         <input
                           type="text"
                           required
-                          placeholder={payType === 'in' ? "Owner Client's Name" : 'Material Store / Subcontractor Ltd'}
+                          placeholder={payType === 'in' ? "Owner Client's Name" : 'Material store, contractor, or site worker'}
                           value={partyInput}
                           onChange={(e) => setPartyInput(e.target.value)}
                           className="w-full bg-slate-50 border border-slate-250 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -775,6 +780,8 @@ export default function ProjectDetail({
           <ContactManager
             contacts={contacts}
             onAddContact={onAddContact}
+            onAddContacts={onAddContacts}
+            onUpdateContactRole={onUpdateContactRole}
             payments={payments}
             projects={projects}
           />
@@ -925,13 +932,14 @@ export default function ProjectDetail({
                   <label className="text-[10px] uppercase font-bold text-slate-400">Party Portfolio Role</label>
                   <select
                     value={editPartyRole}
-                    onChange={(e) => setEditPartyRole(e.target.value as any)}
+                    onChange={(e) => setEditPartyRole(e.target.value as PartyRole)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 outline-none font-medium text-slate-800"
                   >
-                    <option value="client">Client (Homeowner/Payer)</option>
-                    <option value="vendor">Vendor (Material/Subcontractor)</option>
-                    <option value="supplier">Supplier (Dealers/Agencies)</option>
-                    <option value="other">Other Account Ledger</option>
+                    {PARTY_ROLE_OPTIONS.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>

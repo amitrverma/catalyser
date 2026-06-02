@@ -1,6 +1,7 @@
 import {
   ContactRole,
   DocumentCategory,
+  PartyRole,
   PaymentMode,
   PaymentType,
   ProjectStatus,
@@ -40,7 +41,7 @@ export interface PaymentRow {
   type: PaymentType;
   amount: number | null;
   party: string;
-  party_role: 'client' | 'vendor' | 'supplier' | 'other';
+  party_role: PartyRole;
   payment_mode: PaymentMode;
   remark: string | null;
   payment_date: string;

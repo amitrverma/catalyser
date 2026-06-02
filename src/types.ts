@@ -20,7 +20,7 @@ export interface Payment {
   type: PaymentType;
   amount: number;
   party: string; // Given to or received from
-  partyRole: 'client' | 'vendor' | 'supplier' | 'other';
+  partyRole: PartyRole;
   paymentMode: PaymentMode;
   remark: string;
   date: string; // ISO format or YYYY-MM-DD
@@ -28,7 +28,8 @@ export interface Payment {
   billPhotoStoragePath?: string;
 }
 
-export type ContactRole = 'client' | 'vendor' | 'supplier';
+export type ContactRole = 'client' | 'vendor' | 'supplier' | 'contractor' | 'site_worker' | 'other';
+export type PartyRole = ContactRole;
 
 export interface Contact {
   id: string;

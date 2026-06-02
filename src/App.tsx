@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Project, Payment, Contact, CloudDocument, ProjectStatus, PaymentType, DocumentCategory, DbData } from './types';
+import { Project, Payment, Contact, CloudDocument, ProjectStatus, PaymentType, DocumentCategory, DbData, ContactRole } from './types';
 import { getDbData, saveDbData } from './lib/db';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { hydrateSettingsFromSupabase, installSettingsPersistence, persistSettingsToSupabase } from './lib/settingsSync';
@@ -232,7 +232,7 @@ export default function App() {
 
   const handleAddContact = (
     name: string,
-    role: 'client' | 'vendor' | 'supplier',
+    role: ContactRole,
     phone: string,
     email: string,
     company: string,
@@ -253,6 +253,45 @@ export default function App() {
     const updated = {
       ...db,
       contacts: [newContact, ...db.contacts],
+    };
+    saveState(updated);
+  };
+
+  const handleAddContacts = (
+    contactInputs: Array<{
+      name: string;
+      role: ContactRole;
+      phone: string;
+      email: string;
+      company: string;
+      gstNumber?: string;
+      address?: string;
+    }>
+  ) => {
+    if (contactInputs.length === 0) return;
+    const timestamp = Date.now();
+    const newContacts: Contact[] = contactInputs.map((contact, index) => ({
+      id: `c-${timestamp}-${index}`,
+      name: contact.name,
+      role: contact.role,
+      phone: contact.phone,
+      email: contact.email,
+      company: contact.company,
+      gstNumber: contact.gstNumber,
+      address: contact.address,
+    }));
+
+    const updated = {
+      ...db,
+      contacts: [...newContacts, ...db.contacts],
+    };
+    saveState(updated);
+  };
+
+  const handleUpdateContactRole = (contactId: string, role: ContactRole) => {
+    const updated = {
+      ...db,
+      contacts: db.contacts.map((contact) => (contact.id === contactId ? { ...contact, role } : contact)),
     };
     saveState(updated);
   };
@@ -580,6 +619,8 @@ export default function App() {
             onDeletePayment={handleDeletePayment}
             onEditPayment={handleEditPayment}
             onAddContact={handleAddContact}
+            onAddContacts={handleAddContacts}
+            onUpdateContactRole={handleUpdateContactRole}
             onAddDocument={handleAddDocument}
             onDeleteDocument={handleDeleteDocument}
             onDownloadDocument={handleDownloadDocument}
@@ -619,15 +660,17 @@ export default function App() {
               )}
 
               {homeTab === 'contacts' && (
-                <div className="space-y-4">
-                  <div className="bg-slate-950 text-white p-6 rounded-2xl shadow-md text-left">
-                    <h2 className="text-2xl font-bold tracking-tight">Contacts</h2>
-                    <p className="text-slate-200 text-sm mt-1">Clients, vendors, and suppliers used across project ledgers.</p>
+                <div className="space-y-3">
+                  <div className="bg-slate-950 text-white px-4 py-3 rounded-xl shadow-sm text-left flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <h2 className="text-lg font-bold tracking-tight">Contacts</h2>
+                    <p className="text-slate-200 text-xs">Clients, vendors, suppliers, contractors, site workers, and other contacts.</p>
                   </div>
                   <ContactManager
                     contacts={db.contacts}
                     onAddContact={handleAddContact}
                     onDeleteContact={handleDeleteContact}
+                    onAddContacts={handleAddContacts}
+                    onUpdateContactRole={handleUpdateContactRole}
                     payments={db.payments}
                     projects={db.projects}
                   />

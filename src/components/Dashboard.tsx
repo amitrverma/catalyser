@@ -3,6 +3,7 @@ import { Project, Payment, Contact, CloudDocument } from '../types';
 import { DollarSign, FileText, Percent, ShieldCheck, TrendingUp, TrendingDown, Layers, Landmark, HardHat, CircleCheck, AlertCircle, Plus, Trash2, Edit, Check, X, Briefcase } from 'lucide-react';
 import { formatCompactNumber, formatCurrency } from '../lib/formatter';
 import { DEFAULT_CUSTOM_OVERHEADS, DEFAULT_STAFF_SALARIES, getSetting, readJsonSetting, setSetting } from '../lib/settingsStore';
+import { DEDUCTIBLE_PARTY_ROLES } from '../lib/roleLabels';
 
 interface DashboardProps {
   projects: Project[];
@@ -162,9 +163,9 @@ export default function Dashboard({
   const docsReady = documents.length - docsPending;
 
   // Tax calculations based on filtered payments
-  // Deductibles are payments out given to vendors or suppliers (as opposed to client payouts or 'other')
+  // Deductibles are project outlays given to supply, contractor, site worker, or service partner roles.
   const deductiblesArray = cashOutArray.filter(
-    (p) => p.partyRole === 'vendor' || p.partyRole === 'supplier'
+    (p) => DEDUCTIBLE_PARTY_ROLES.includes(p.partyRole)
   );
   const totalDeductibles = deductiblesArray.reduce((acc, p) => acc + p.amount, 0) + totalCustomOverhead;
   
@@ -183,8 +184,8 @@ export default function Dashboard({
     .filter((p) => p.type === 'out' && p.partyRole === 'supplier')
     .reduce((acc, p) => acc + p.amount, 0);
     
-  const contractingExpenses = filteredPayments
-    .filter((p) => p.type === 'out' && p.partyRole === 'vendor')
+  const siteWorkExpenses = filteredPayments
+    .filter((p) => p.type === 'out' && ['vendor', 'contractor', 'site_worker'].includes(p.partyRole))
     .reduce((acc, p) => acc + p.amount, 0);
 
   const overheadExpenses = filteredPayments
@@ -215,7 +216,7 @@ export default function Dashboard({
       ['Profit Margin (%)', marginPercentage.toFixed(1) + '%'],
       [''],
       ['TAX REPORT METRICS'],
-      ['Deductible Supplier & Vendor Expenses', totalDeductibles],
+      ['Deductible Project Partner Expenses', totalDeductibles],
       ['Taxable Income Base', taxableIncome],
       [`Estimated Income Tax (${taxRate}%)`, estimatedTax],
       [`Sales Tax / GST Collected (${gstRate}%)`, gstCollected.toFixed(2)],
@@ -224,7 +225,7 @@ export default function Dashboard({
       [''],
       ['EXPENSE BREAKDOWN BY CONTRACT ROLE'],
       ['Material Suppliers Pool', materialExpenses],
-      ['Sub-contracted Vendors Pool', contractingExpenses],
+      ['Contractors, Vendors & Site Workers Pool', siteWorkExpenses],
       ['Operational & Other Overhead (Includes Corporate Overheads)', overheadExpenses],
       [''],
       ['SUPPLEMENTAL OFFICE OVERHEADS BREAKDOWN']
@@ -336,7 +337,7 @@ export default function Dashboard({
           <div>
             <span className="text-slate-400 text-xs font-medium block">Total Expenses</span>
             <span className="text-xl font-bold text-rose-600">{formatCurrency(totalCashOut)}</span>
-            <span className="text-[10px] text-slate-500 block mt-0.5">Labor &amp; Material purchases</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">Site work &amp; material purchases</span>
           </div>
         </div>
 
@@ -389,7 +390,7 @@ export default function Dashboard({
                       strokeWidth="12"
                       strokeDasharray={`${(materialExpenses / totalCashOut) * 251.2} 251.2`}
                     />
-                    {/* Contracting Vendors Segment */}
+                    {/* Contracting, Vendor, and Site Worker Segment */}
                     <circle
                       cx="50"
                       cy="50"
@@ -397,7 +398,7 @@ export default function Dashboard({
                       fill="transparent"
                       stroke="#00509e"
                       strokeWidth="12"
-                      strokeDasharray={`${(contractingExpenses / totalCashOut) * 251.2} 251.2`}
+                      strokeDasharray={`${(siteWorkExpenses / totalCashOut) * 251.2} 251.2`}
                       strokeDashoffset={`-${(materialExpenses / totalCashOut) * 251.2}`}
                     />
                     {/* Overhead & Others Segment */}
@@ -409,7 +410,7 @@ export default function Dashboard({
                       stroke="#66a3ff"
                       strokeWidth="12"
                       strokeDasharray={`${(overheadExpenses / totalCashOut) * 251.2} 251.2`}
-                      strokeDashoffset={`-${((materialExpenses + contractingExpenses) / totalCashOut) * 251.2}`}
+                      strokeDashoffset={`-${((materialExpenses + siteWorkExpenses) / totalCashOut) * 251.2}`}
                     />
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
@@ -432,8 +433,8 @@ export default function Dashboard({
                   <div className="flex items-center gap-1.5">
                     <span className="w-3 h-3 rounded bg-[#00509e]"></span>
                     <div className="text-left">
-                      <span className="text-[10px] text-slate-400 block leading-tight">Vendors</span>
-                      <span className="text-xs font-semibold text-slate-700">{formatCurrency(contractingExpenses)}</span>
+                      <span className="text-[10px] text-slate-400 block leading-tight">Site Work</span>
+                      <span className="text-xs font-semibold text-slate-700">{formatCurrency(siteWorkExpenses)}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -450,7 +451,7 @@ export default function Dashboard({
 
           <div className="border-t border-slate-100 pt-3 text-center">
             <span className="text-[11px] text-slate-400">
-              Deduction estimates use supplier and vendor classifications
+              Deduction estimates use supplier, vendor, contractor, and site worker classifications
             </span>
           </div>
         </div>

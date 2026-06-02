@@ -1,11 +1,36 @@
 import React, { useState } from 'react';
 import { Contact, ContactRole, Payment, Project } from '../types';
 import { formatDate } from '../lib/formatter';
-import { Plus, User, Phone, Mail, Building2, UserCheck, Trash2, ShieldCheck, Tag, Receipt, ArrowUpRight } from 'lucide-react';
+import { CONTACT_ROLE_OPTIONS, getContactRoleConfig } from '../lib/roleLabels';
+import { Plus, User, Phone, Mail, Building2, UserCheck, Trash2, ShieldCheck, Tag, Receipt, ArrowUpRight, UserPlus } from 'lucide-react';
+
+type ContactInput = {
+  name: string;
+  role: ContactRole;
+  phone: string;
+  email: string;
+  company: string;
+  gstNumber?: string;
+  address?: string;
+};
+
+type PickedContact = {
+  name?: string[];
+  email?: string[];
+  tel?: string[];
+};
+
+type NavigatorWithContacts = Navigator & {
+  contacts?: {
+    select: (properties: Array<'name' | 'email' | 'tel'>, options?: { multiple?: boolean }) => Promise<PickedContact[]>;
+  };
+};
 
 interface ContactManagerProps {
   contacts: Contact[];
   onAddContact: (name: string, role: ContactRole, phone: string, email: string, company: string, gstNumber?: string, address?: string) => void;
+  onAddContacts?: (contacts: ContactInput[]) => void;
+  onUpdateContactRole?: (contactId: string, role: ContactRole) => void;
   onDeleteContact?: (contactId: string) => void;
   payments?: Payment[];
   projects?: Project[];
@@ -14,6 +39,8 @@ interface ContactManagerProps {
 export default function ContactManager({
   contacts,
   onAddContact,
+  onAddContacts,
+  onUpdateContactRole,
   onDeleteContact,
   payments = [],
   projects = [],
@@ -30,6 +57,7 @@ export default function ContactManager({
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [selectedContactId, setSelectedContactId] = useState<string | null>(contacts[0]?.id || null);
   const [selectedContactForLedger, setSelectedContactForLedger] = useState<Contact | null>(null);
+  const [importStatus, setImportStatus] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,6 +72,55 @@ export default function ContactManager({
     setShowAddForm(false);
   };
 
+  const handleImportFromDeviceContacts = async () => {
+    setImportStatus('');
+    const contactsApi = (navigator as NavigatorWithContacts).contacts;
+    if (!contactsApi?.select) {
+      setImportStatus('Mobile contact import is only available in supported secure mobile browsers.');
+      return;
+    }
+
+    try {
+      const pickedContacts = await contactsApi.select(['name', 'email', 'tel'], { multiple: true });
+      const importedContacts: ContactInput[] = pickedContacts
+        .map((pickedContact) => {
+          const importedName =
+            pickedContact.name?.[0]?.trim() ||
+            pickedContact.tel?.[0]?.trim() ||
+            pickedContact.email?.[0]?.trim() ||
+            '';
+          return {
+            name: importedName,
+            role: 'other' as ContactRole,
+            phone: pickedContact.tel?.[0]?.trim() || '',
+            email: pickedContact.email?.[0]?.trim() || '',
+            company: '',
+          };
+        })
+        .filter((contact) => contact.name);
+
+      if (importedContacts.length === 0) {
+        setImportStatus('No contacts were selected.');
+        return;
+      }
+
+      if (onAddContacts) {
+        onAddContacts(importedContacts);
+      } else {
+        importedContacts.forEach((contact) => {
+          onAddContact(contact.name, contact.role, contact.phone, contact.email, contact.company);
+        });
+      }
+      setImportStatus(`Imported ${importedContacts.length} contact${importedContacts.length !== 1 ? 's' : ''} as Other.`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setImportStatus('Contact import cancelled.');
+        return;
+      }
+      setImportStatus('Unable to import contacts from this browser.');
+    }
+  };
+
   // Filter contacts
   const filteredContacts = contacts.filter((c) => {
     const matchesSearch =
@@ -56,48 +133,81 @@ export default function ContactManager({
     return matchesSearch && c.role === roleFilter;
   });
   const selectedContact = filteredContacts.find((contact) => contact.id === selectedContactId) || filteredContacts[0] || null;
-  const roleCounts = {
-    all: contacts.length,
-    client: contacts.filter((contact) => contact.role === 'client').length,
-    vendor: contacts.filter((contact) => contact.role === 'vendor').length,
-    supplier: contacts.filter((contact) => contact.role === 'supplier').length,
-  };
+  const roleCounts = CONTACT_ROLE_OPTIONS.reduce(
+    (counts, option) => ({
+      ...counts,
+      [option.id]: contacts.filter((contact) => contact.role === option.id).length,
+    }),
+    { all: contacts.length } as Record<ContactRole | 'all', number>,
+  );
+
+  const roleFilterItems = [
+    { id: 'all', label: 'All', count: roleCounts.all },
+    ...CONTACT_ROLE_OPTIONS.map((option) => ({
+      id: option.id,
+      label: option.pluralLabel,
+      count: roleCounts[option.id],
+    })),
+  ];
 
   return (
-    <div className="space-y-4" id="contacts-management-tab">
-      {/* Search and Quick Trigger row */}
-      <div className="flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center">
-        <div className="flex gap-2 flex-grow">
+    <div className="space-y-3" id="contacts-management-tab">
+      <div className="flex flex-col gap-2 rounded-xl border border-slate-150 bg-white p-2.5 shadow-xs">
+        <div className="flex flex-col sm:flex-row gap-2 justify-between items-stretch sm:items-center">
           <input
             type="text"
             placeholder="Search directory..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="min-w-0 flex-1 bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            className="bg-white border border-slate-200 rounded-xl px-2 py-2 text-xs font-semibold text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          <button
+            onClick={() => setShowAddForm(true)}
+            className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3 py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-xs whitespace-nowrap"
           >
-            <option value="all">All Roles</option>
-            <option value="client">Clients</option>
-            <option value="vendor">Vendors</option>
-            <option value="supplier">Suppliers</option>
-          </select>
+            <Plus size={14} /> Add Partner
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleImportFromDeviceContacts()}
+            className="bg-white hover:bg-slate-50 text-slate-650 font-bold text-xs px-3 py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 whitespace-nowrap"
+            title="Import from this device's contacts when supported"
+          >
+            <UserPlus size={14} /> Import Mobile
+          </button>
         </div>
-        
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-xs"
-        >
-          <Plus size={14} /> Add Partner
-        </button>
+
+        {importStatus && (
+          <div className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-[11px] font-semibold text-blue-700">
+            {importStatus}
+          </div>
+        )}
+
+        <div className="flex gap-1.5 overflow-x-auto scrollbar-hidden pb-0.5" aria-label="Contact role filters">
+          {roleFilterItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                setRoleFilter(item.id);
+                setSelectedContactId(null);
+              }}
+              className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-left transition cursor-pointer ${
+                roleFilter === item.id
+                  ? 'border-[#66a3ff] bg-blue-50 text-[#003366]'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <span className="text-[10px] font-bold uppercase tracking-wide">{item.label}</span>
+              <span className="ml-1.5 font-mono text-[10px] font-black">{item.count}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Inline Quick Add Form Drawer */}
       {showAddForm && (
-        <form onSubmit={handleSubmit} className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col gap-3 animate-in slide-in-from-top-3 duration-150 text-left">
+        <form onSubmit={handleSubmit} className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex flex-col gap-2.5 animate-in slide-in-from-top-3 duration-150 text-left">
           <h4 className="text-xs font-extrabold text-slate-700 uppercase tracking-widest flex items-center gap-1">
             <UserCheck size={14} className="text-blue-600" /> Register Directory Contact
           </h4>
@@ -121,9 +231,11 @@ export default function ContactManager({
                 onChange={(e) => setRole(e.target.value as ContactRole)}
                 className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold"
               >
-                <option value="client">Client (Owner Paying Retainers)</option>
-                <option value="vendor">Vendor (Installer / Contractor)</option>
-                <option value="supplier">Material Supplier (Stone, Wood, Tile)</option>
+                {CONTACT_ROLE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.selectLabel}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -203,46 +315,19 @@ export default function ContactManager({
       )}
 
       {/* Focused directory layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-left">
-        <aside className="lg:col-span-4 xl:col-span-3 space-y-3">
-          <div className="bg-white rounded-xl border border-slate-150 shadow-xs p-3">
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { id: 'all', label: 'All', count: roleCounts.all },
-                { id: 'client', label: 'Clients', count: roleCounts.client },
-                { id: 'vendor', label: 'Vendors', count: roleCounts.vendor },
-                { id: 'supplier', label: 'Suppliers', count: roleCounts.supplier },
-              ].map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    setRoleFilter(item.id);
-                    setSelectedContactId(null);
-                  }}
-                  className={`rounded-lg border px-3 py-2 text-left transition cursor-pointer ${
-                    roleFilter === item.id
-                      ? 'border-[#66a3ff] bg-blue-50 text-[#003366]'
-                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <span className="block text-[10px] font-bold uppercase tracking-wide">{item.label}</span>
-                  <span className="mt-0.5 block text-lg font-black">{item.count}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 text-left">
+        <aside className="lg:col-span-5 xl:col-span-4">
           <div className="bg-white rounded-xl border border-slate-150 shadow-xs overflow-hidden">
-            <div className="border-b border-slate-100 px-3 py-2.5">
+            <div className="border-b border-slate-100 px-3 py-2 flex items-center justify-between">
               <span className="text-xs font-bold text-slate-800">Directory</span>
-              <span className="ml-2 text-[11px] text-slate-400">{filteredContacts.length} shown</span>
+              <span className="text-[11px] text-slate-400">{filteredContacts.length} shown</span>
             </div>
-            <div className="max-h-[560px] overflow-y-auto divide-y divide-slate-100">
+            <div className="max-h-[calc(100vh-245px)] min-h-[260px] overflow-y-auto scrollbar-hidden divide-y divide-slate-100">
               {filteredContacts.length === 0 ? (
                 <div className="p-6 text-center text-xs text-slate-400">No contacts match your filters.</div>
               ) : (
                 filteredContacts.map((c) => {
+                  const roleConfig = getContactRoleConfig(c.role);
                   const partyPaymentsCount = payments.filter(
                     (p) => p.party.trim().toLowerCase() === c.name.trim().toLowerCase()
                   ).length;
@@ -252,7 +337,7 @@ export default function ContactManager({
                       key={c.id}
                       type="button"
                       onClick={() => setSelectedContactId(c.id)}
-                      className={`w-full border-none px-3 py-3 text-left transition cursor-pointer ${
+                      className={`w-full border-none px-3 py-2.5 text-left transition cursor-pointer ${
                         isSelected ? 'bg-blue-50' : 'bg-white hover:bg-slate-50'
                       }`}
                     >
@@ -261,17 +346,11 @@ export default function ContactManager({
                           <span className="block truncate text-sm font-bold text-slate-900">{c.name}</span>
                           <span className="mt-0.5 block truncate text-xs text-slate-500">{c.company || c.email || c.phone || 'No company details'}</span>
                         </div>
-                        <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold capitalize ${
-                          c.role === 'client'
-                            ? 'border-blue-100 bg-blue-50 text-[#00509e]'
-                            : c.role === 'vendor'
-                            ? 'border-amber-200 bg-amber-50 text-amber-700'
-                            : 'border-green-200 bg-green-50 text-green-700'
-                        }`}>
-                          {c.role}
+                        <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold ${roleConfig.badgeClass}`}>
+                          {roleConfig.label}
                         </span>
                       </div>
-                      <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+                      <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-400">
                         <span>{partyPaymentsCount} transaction{partyPaymentsCount !== 1 ? 's' : ''}</span>
                         <span>{c.phone || c.email ? 'Contactable' : 'Incomplete'}</span>
                       </div>
@@ -283,18 +362,10 @@ export default function ContactManager({
           </div>
         </aside>
 
-        <section className="lg:col-span-8 xl:col-span-9">
+        <section className="lg:col-span-7 xl:col-span-8">
           {selectedContact ? (() => {
             const c = selectedContact;
-          let badgeColor = 'bg-blue-50 text-blue-700 border-blue-100';
-          let roleTitle = 'Client (Owner)';
-          if (c.role === 'vendor') {
-            badgeColor = 'bg-slate-100 text-slate-700 border-slate-200';
-            roleTitle = 'Vendor Sub-Contractor';
-          } else if (c.role === 'supplier') {
-            badgeColor = 'bg-slate-200 text-slate-650 border-slate-305';
-            roleTitle = 'Material Supplier';
-          }
+          const roleConfig = getContactRoleConfig(c.role);
 
           const partyPaymentsCount = payments.filter(
             (p) => p.party.trim().toLowerCase() === c.name.trim().toLowerCase()
@@ -309,16 +380,16 @@ export default function ContactManager({
             <div
               className="bg-white rounded-xl border border-slate-150 shadow-xs overflow-hidden"
             >
-              <div className="p-5 border-b border-slate-100">
-                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                  <div>
-                    <span className={`inline-flex rounded-md border px-2 py-1 text-[10px] font-bold ${badgeColor}`}>
-                      {roleTitle}
+              <div className="p-4 border-b border-slate-100">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0">
+                    <span className={`inline-flex rounded-md border px-2 py-1 text-[10px] font-bold ${roleConfig.badgeClass}`}>
+                      {roleConfig.detailLabel}
                     </span>
-                    <h3 className="mt-3 text-xl font-black text-slate-950">{c.name}</h3>
-                    <p className="mt-1 text-sm text-slate-500">{c.company || 'No company added'}</p>
+                    <h3 className="mt-2 truncate text-lg font-black text-slate-950">{c.name}</h3>
+                    <p className="mt-0.5 truncate text-xs text-slate-500">{c.company || 'No company added'}</p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 xl:justify-end">
                     <button
                       type="button"
                       onClick={() => setSelectedContactForLedger(c)}
@@ -339,11 +410,11 @@ export default function ContactManager({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 xl:grid-cols-3 gap-0">
-                <div className="xl:col-span-1 border-b xl:border-b-0 xl:border-r border-slate-100 p-5 space-y-4">
+              <div className="grid grid-cols-1 xl:grid-cols-5 gap-0">
+                <div className="xl:col-span-2 border-b xl:border-b-0 xl:border-r border-slate-100 p-4 space-y-3">
                   <div>
                     <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Contact Details</span>
-                    <div className="mt-3 space-y-3 text-sm">
+                    <div className="mt-2 space-y-2 text-xs">
                       <div className="flex gap-2 text-slate-700">
                         <Phone size={15} className="mt-0.5 shrink-0 text-slate-400" />
                         <span>{c.phone || 'No phone added'}</span>
@@ -358,42 +429,56 @@ export default function ContactManager({
                       </div>
                     </div>
                   </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Role Category</label>
+                    <select
+                      value={c.role}
+                      onChange={(event) => onUpdateContactRole?.(c.id, event.target.value as ContactRole)}
+                      disabled={!onUpdateContactRole}
+                      className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {CONTACT_ROLE_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.selectLabel}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   {c.gstNumber && (
-                    <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 p-2.5">
                       <span className="block text-[10px] font-bold uppercase tracking-wide text-[#00509e]">GSTIN</span>
                       <span className="mt-1 block font-mono text-xs font-bold text-slate-800">{c.gstNumber}</span>
                     </div>
                   )}
                 </div>
 
-                <div className="xl:col-span-2 p-5 space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                <div className="xl:col-span-3 p-4 space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-2">
                       <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Transactions</span>
-                      <span className="mt-1 block text-lg font-black text-slate-900">{partyPaymentsCount}</span>
+                      <span className="mt-0.5 block text-sm font-black text-slate-900">{partyPaymentsCount}</span>
                     </div>
-                    <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                    <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-2">
                       <span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-700">Received</span>
-                      <span className="mt-1 block text-lg font-black text-emerald-700">₹{totalIn.toLocaleString()}</span>
+                      <span className="mt-0.5 block truncate text-sm font-black text-emerald-700">₹{totalIn.toLocaleString()}</span>
                     </div>
-                    <div className="rounded-lg border border-rose-100 bg-rose-50 p-3">
+                    <div className="rounded-lg border border-rose-100 bg-rose-50 p-2">
                       <span className="block text-[10px] font-bold uppercase tracking-wide text-rose-700">Paid</span>
-                      <span className="mt-1 block text-lg font-black text-rose-700">₹{totalOut.toLocaleString()}</span>
+                      <span className="mt-0.5 block truncate text-sm font-black text-rose-700">₹{totalOut.toLocaleString()}</span>
                     </div>
                   </div>
-
                   <div className="rounded-xl border border-slate-150 overflow-hidden">
                     <div className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700">
                       Recent ledger activity
                     </div>
                     {partyPayments.length === 0 ? (
-                      <div className="p-8 text-center text-sm text-slate-400">No transactions recorded for this contact.</div>
+                      <div className="p-6 text-center text-xs text-slate-400">No transactions recorded for this contact.</div>
                     ) : (
-                      <div className="divide-y divide-slate-100">
+                      <div className="max-h-[300px] divide-y divide-slate-100 overflow-y-auto scrollbar-hidden">
                         {partyPayments.slice(0, 5).map((payment) => {
                           const project = projects.find((item) => item.id === payment.projectId);
                           return (
-                            <div key={payment.id} className="grid grid-cols-12 gap-3 px-3 py-3 text-xs">
+                            <div key={payment.id} className="grid grid-cols-12 gap-2 px-3 py-2.5 text-xs">
                               <div className="col-span-3 font-mono text-slate-500">{formatDate(payment.date)}</div>
                               <div className="col-span-5 min-w-0">
                                 <span className="block truncate font-semibold text-slate-800">{project?.name || 'Unknown project'}</span>
@@ -413,7 +498,7 @@ export default function ContactManager({
             </div>
           );
         })() : (
-          <div className="bg-white rounded-xl border border-slate-150 p-12 text-center text-slate-400">
+          <div className="bg-white rounded-xl border border-slate-150 p-8 text-center text-slate-400">
             Select a contact to view details.
           </div>
         )}
@@ -503,7 +588,7 @@ export default function ContactManager({
                   </div>
 
                   {/* Payments Table */}
-                  <div className="max-h-[280px] overflow-y-auto border border-slate-150 rounded-xl">
+                  <div className="max-h-[280px] overflow-y-auto scrollbar-hidden border border-slate-150 rounded-xl">
                     {partyPayments.length === 0 ? (
                       <div className="py-12 text-center text-slate-400">
                         <Receipt className="mx-auto text-slate-350 mb-2 animate-pulse" size={28} />

@@ -1,6 +1,7 @@
 import type {
   ContactRole,
   DocumentCategory,
+  PartyRole,
   PaymentMode,
   PaymentType,
   ProjectStatus,
@@ -111,7 +112,7 @@ export interface Database {
           type: PaymentType;
           amount: number;
           party: string;
-          party_role: 'client' | 'vendor' | 'supplier' | 'other';
+          party_role: PartyRole;
           payment_mode: PaymentMode;
           remark: string;
           payment_date: string;
@@ -126,7 +127,7 @@ export interface Database {
           type: PaymentType;
           amount: number;
           party: string;
-          party_role: 'client' | 'vendor' | 'supplier' | 'other';
+          party_role: PartyRole;
           payment_mode: PaymentMode;
           remark: string;
           payment_date: string;

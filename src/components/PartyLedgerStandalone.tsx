@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Project, Payment, Contact, PaymentMode, PaymentType, DbData } from '../types';
+import { Project, Payment, Contact, PaymentMode, PaymentType, DbData, PartyRole } from '../types';
 import { getDbData, saveDbData } from '../lib/db';
 import { formatDate } from '../lib/formatter';
+import { PARTY_ROLE_OPTIONS } from '../lib/roleLabels';
 import { Receipt, Calendar, Edit2, Trash2, Camera, Check, ExternalLink, ArrowLeftRight, Landmark, Tag } from 'lucide-react';
 
 interface PartyLedgerStandaloneProps {
@@ -14,7 +15,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [editParty, setEditParty] = useState('');
-  const [editPartyRole, setEditPartyRole] = useState<'client' | 'vendor' | 'supplier' | 'other'>('other');
+  const [editPartyRole, setEditPartyRole] = useState<PartyRole>('other');
   const [editPaymentMode, setEditPaymentMode] = useState<PaymentMode>('bank_transfer');
   const [editRemark, setEditRemark] = useState('');
   const [editDate, setEditDate] = useState('');
@@ -400,13 +401,14 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                   <label className="text-[10px] uppercase font-bold text-slate-400">Beneficiary Classification</label>
                   <select
                     value={editPartyRole}
-                    onChange={(e) => setEditPartyRole(e.target.value as any)}
+                    onChange={(e) => setEditPartyRole(e.target.value as PartyRole)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none font-medium text-slate-800"
                   >
-                    <option value="client">Client (Owner Retainer)</option>
-                    <option value="vendor">Vendor (Installer / Contractor)</option>
-                    <option value="supplier font-sans">Supplier (Material Store)</option>
-                    <option value="other">Other Account Ledger</option>
+                    {PARTY_ROLE_OPTIONS.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
