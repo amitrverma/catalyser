@@ -173,7 +173,7 @@ export default function ContactManager({
             className="bg-white hover:bg-slate-50 text-slate-650 font-bold text-xs px-3 py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 whitespace-nowrap"
             title="Import from this device's contacts when supported"
           >
-            <UserPlus size={14} /> Import Mobile
+            <UserPlus size={14} /> Import Contacts
           </button>
         </div>
 
