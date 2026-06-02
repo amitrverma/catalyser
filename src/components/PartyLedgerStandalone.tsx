@@ -33,17 +33,14 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
       if (mounted) setDb(data);
     });
 
-    // Listen to changes from other tabs to keep sync
-    const handleStorageChange = async (e: StorageEvent) => {
-      if (e.key && e.key.startsWith('cc_')) {
-        const data = await getDbData();
-        setDb(data);
-      }
+    const handleDbChange = async () => {
+      const data = await getDbData();
+      setDb(data);
     };
-    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('custom-db-updated', handleDbChange);
     return () => {
       mounted = false;
-      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('custom-db-updated', handleDbChange);
     };
   }, []);
 
@@ -122,7 +119,6 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
 
     // Notify other tabs immediately
     window.dispatchEvent(new Event('custom-db-updated'));
-    localStorage.setItem('cc_sync_trigger', Date.now().toString());
   };
 
   const handleDeletePayment = (id: string) => {
@@ -136,7 +132,6 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
 
     // Notify other tabs immediately
     window.dispatchEvent(new Event('custom-db-updated'));
-    localStorage.setItem('cc_sync_trigger', Date.now().toString());
   };
 
   return (

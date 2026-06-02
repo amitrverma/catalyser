@@ -5,7 +5,7 @@ export interface ActiveOrganization {
   name: string;
 }
 
-const ACTIVE_ORG_KEY = 'catalyser_active_org_id';
+let activeOrgId: string | null = null;
 
 export async function ensureActiveOrganization(): Promise<ActiveOrganization | null> {
   if (!isSupabaseConfigured || !supabase) return null;
@@ -16,7 +16,7 @@ export async function ensureActiveOrganization(): Promise<ActiveOrganization | n
 
   if (!user) return null;
 
-  const preferredOrgId = localStorage.getItem(ACTIVE_ORG_KEY);
+  const preferredOrgId = activeOrgId;
   const membershipsResult = await supabase
     .from('organization_memberships')
     .select('organization_id')
@@ -38,7 +38,7 @@ export async function ensureActiveOrganization(): Promise<ActiveOrganization | n
       .maybeSingle();
 
     if (organizationResult.data?.id && organizationResult.data.name) {
-      localStorage.setItem(ACTIVE_ORG_KEY, organizationResult.data.id);
+      activeOrgId = organizationResult.data.id;
       return { id: organizationResult.data.id, name: organizationResult.data.name };
     }
   }
@@ -49,10 +49,10 @@ export async function ensureActiveOrganization(): Promise<ActiveOrganization | n
     return null;
   }
 
-  localStorage.setItem(ACTIVE_ORG_KEY, rpcResult.data);
+  activeOrgId = rpcResult.data;
   return { id: rpcResult.data, name: 'Personal Workspace' };
 }
 
 export function getCachedActiveOrgId() {
-  return localStorage.getItem(ACTIVE_ORG_KEY);
+  return activeOrgId;
 }

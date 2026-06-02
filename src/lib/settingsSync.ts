@@ -1,5 +1,6 @@
 import { isSupabaseConfigured, supabase } from './supabase';
 import { ensureActiveOrganization } from './orgs';
+import { readJsonSetting, removeSetting, setSetting, snapshotSettings } from './settingsStore';
 
 const SETTINGS_KEYS = [
   'cc_company_name',
@@ -48,22 +49,16 @@ function canSync() {
 }
 
 function readJsonValue<T>(key: string, fallback: T): T {
-  const value = localStorage.getItem(key);
-  if (!value) return fallback;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
+  return readJsonSetting(key, fallback);
 }
 
 function writeNullableLocalValue(key: string, value: unknown) {
   if (value === null || value === undefined) {
-    localStorage.removeItem(key);
+    removeSetting(key);
     return;
   }
 
-  localStorage.setItem(key, String(value));
+  setSetting(key, String(value));
 }
 
 function extensionForContentType(contentType: string) {
@@ -108,8 +103,8 @@ async function hydrateAssetUrls(settings: Record<string, unknown>) {
       try {
         const signedUrl = await createSignedAssetUrl(storagePath);
         if (signedUrl) {
-          localStorage.setItem(asset.dataKey, signedUrl);
-          localStorage.setItem(asset.pathKey, storagePath);
+          setSetting(asset.dataKey, signedUrl);
+          setSetting(asset.pathKey, storagePath);
         }
       } catch (error) {
         console.error('Supabase signed asset URL failed:', error);
@@ -130,9 +125,9 @@ async function migrateLocalAssetsToStorage(userId: string, settings: Record<stri
       const signedUrl = await createSignedAssetUrl(path);
       settings[asset.pathKey] = path;
       settings[asset.dataKey] = null;
-      localStorage.setItem(asset.pathKey, path);
+      setSetting(asset.pathKey, path);
       if (signedUrl) {
-        localStorage.setItem(asset.dataKey, signedUrl);
+        setSetting(asset.dataKey, signedUrl);
       }
     } catch (error) {
       console.error('Supabase asset upload failed:', error);
@@ -173,7 +168,7 @@ export async function hydrateSettingsFromSupabase() {
   await hydrateAssetUrls(settings);
 
   if (salariesResult.data?.salaries) {
-    localStorage.setItem(STAFF_SALARIES_KEY, JSON.stringify(salariesResult.data.salaries));
+    setSetting(STAFF_SALARIES_KEY, JSON.stringify(salariesResult.data.salaries));
   }
 
   window.dispatchEvent(new Event('custom-logo-updated'));
@@ -193,10 +188,7 @@ export async function persistSettingsToSupabase() {
   const activeOrg = await ensureActiveOrganization();
   const orgId = activeOrg?.id || null;
 
-  const settings = SETTINGS_KEYS.reduce<Record<string, string | null>>((acc, key) => {
-    acc[key] = localStorage.getItem(key);
-    return acc;
-  }, {});
+  const settings = snapshotSettings(SETTINGS_KEYS);
   await migrateLocalAssetsToStorage(user.id, settings);
 
   const salaries = readJsonValue(STAFF_SALARIES_KEY, []);

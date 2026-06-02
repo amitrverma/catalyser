@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Project, Payment, Contact, CloudDocument } from '../types';
 import { DollarSign, FileText, Percent, ShieldCheck, TrendingUp, TrendingDown, Layers, Landmark, HardHat, CircleCheck, AlertCircle, Plus, Trash2, Edit, Check, X, Briefcase } from 'lucide-react';
 import { formatCompactNumber, formatCurrency } from '../lib/formatter';
+import { DEFAULT_CUSTOM_OVERHEADS, DEFAULT_STAFF_SALARIES, getSetting, readJsonSetting, setSetting } from '../lib/settingsStore';
 
 interface DashboardProps {
   projects: Project[];
@@ -19,44 +20,28 @@ export default function Dashboard({
   onSelectProject
 }: DashboardProps) {
   const [taxRate, setTaxRate] = useState<number>(() => {
-    const saved = localStorage.getItem('cc_tax_rate');
+    const saved = getSetting('cc_tax_rate');
     return saved ? Number(saved) : 20;
   });
   const [gstRate, setGstRate] = useState<number>(() => {
-    const saved = localStorage.getItem('cc_gst_rate');
+    const saved = getSetting('cc_gst_rate');
     return saved ? Number(saved) : 18;
   });
 
   // Supplemental Custom Studio/Office Overhead expenses (not tied to specific project ledgers)
   const [customOverheads, setCustomOverheads] = useState<Array<{ id: string; label: string; amount: number }>>(() => {
-    const saved = localStorage.getItem('cc_custom_overheads');
-    return saved ? JSON.parse(saved) : [
-      { id: 'oh-1', label: 'Pro Design Softwares (AutoCAD, Revit, SketchUp)', amount: 15400 },
-      { id: 'oh-2', label: 'Studio Base Rent & Electric Utilities', amount: 35000 },
-      { id: 'oh-3', label: 'Admin Staff & Site Logistics Reimbursement', amount: 8000 }
-    ];
+    return readJsonSetting('cc_custom_overheads', DEFAULT_CUSTOM_OVERHEADS);
   });
 
   // Staff and salary directory list state (synced with settings and defaults)
   const [staffList, setStaffList] = useState<Array<{ id: string; name: string; role: string; salary: number }>>(() => {
-    const saved = localStorage.getItem('cc_staff_salaries');
-    return saved ? JSON.parse(saved) : [
-      { id: 'st-1', name: 'Ar. Rohit Sharma', role: 'Senior Landscape Architect', salary: 55000 },
-      { id: 'st-2', name: 'Ananya Mehta', role: 'Interior & Space Designer', salary: 38000 },
-      { id: 'st-3', name: 'Kabir Verma', role: '3D Visualiser & Renderer', salary: 28000 }
-    ];
+    return readJsonSetting('cc_staff_salaries', DEFAULT_STAFF_SALARIES);
   });
 
   useEffect(() => {
     const handleUpdate = () => {
-      const savedOverheads = localStorage.getItem('cc_custom_overheads');
-      if (savedOverheads) {
-        setCustomOverheads(JSON.parse(savedOverheads));
-      }
-      const savedStaff = localStorage.getItem('cc_staff_salaries');
-      if (savedStaff) {
-        setStaffList(JSON.parse(savedStaff));
-      }
+      setCustomOverheads(readJsonSetting('cc_custom_overheads', DEFAULT_CUSTOM_OVERHEADS));
+      setStaffList(readJsonSetting('cc_staff_salaries', DEFAULT_STAFF_SALARIES));
     };
     window.addEventListener('custom-settings-updated', handleUpdate);
     window.addEventListener('custom-db-updated', handleUpdate);
@@ -74,7 +59,7 @@ export default function Dashboard({
 
   const saveCustomOverheads = (newOverheads: Array<{ id: string; label: string; amount: number }>) => {
     setCustomOverheads(newOverheads);
-    localStorage.setItem('cc_custom_overheads', JSON.stringify(newOverheads));
+    setSetting('cc_custom_overheads', JSON.stringify(newOverheads));
     // Dispatch instant updating pipeline
     window.dispatchEvent(new Event('custom-db-updated'));
   };
@@ -118,7 +103,7 @@ export default function Dashboard({
   const totalStaffSalaries = staffList.reduce((acc, s) => acc + s.salary, 0);
   const totalCustomOverhead = customOverheads.reduce((acc, x) => acc + x.amount, 0) + totalStaffSalaries;
 
-  const [selectedFy, setSelectedFy] = useState<string>(() => localStorage.getItem('cc_selected_fy') || 'all');
+  const [selectedFy, setSelectedFy] = useState<string>(() => getSetting('cc_selected_fy') || 'all');
 
   // Extract all unique financial years based on payments data combined with some default ones
   const availableFinancialYears = React.useMemo(() => {
@@ -292,7 +277,8 @@ export default function Dashboard({
               value={selectedFy}
               onChange={(e) => {
                 setSelectedFy(e.target.value);
-                localStorage.setItem('cc_selected_fy', e.target.value);
+                setSetting('cc_selected_fy', e.target.value);
+                window.dispatchEvent(new Event('custom-settings-updated'));
               }}
               className="bg-transparent text-white font-extrabold outline-hidden border-none p-0 mt-0.5 cursor-pointer text-[11px] focus:ring-0 focus:outline-hidden"
               style={{ colorScheme: 'dark' }}
@@ -527,7 +513,8 @@ export default function Dashboard({
                   value={taxRate}
                   onChange={(e) => {
                     setTaxRate(Number(e.target.value));
-                    localStorage.setItem('cc_tax_rate', e.target.value);
+                    setSetting('cc_tax_rate', e.target.value);
+                    window.dispatchEvent(new Event('custom-settings-updated'));
                   }}
                   className="w-full accent-[#007acc] cursor-pointer"
                 />
@@ -543,7 +530,8 @@ export default function Dashboard({
                   value={gstRate}
                   onChange={(e) => {
                     setGstRate(Number(e.target.value));
-                    localStorage.setItem('cc_gst_rate', e.target.value);
+                    setSetting('cc_gst_rate', e.target.value);
+                    window.dispatchEvent(new Event('custom-settings-updated'));
                   }}
                   className="w-full accent-rose-500 cursor-pointer"
                 />

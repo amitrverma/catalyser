@@ -99,7 +99,6 @@ export default function App() {
       setSelectedProjectId(route.selectedProjectId);
     };
 
-    // Dynamic storage listener to keep different tabs instantly synced
     const handleStorageSync = async () => {
       const data = await getDbData();
       setDb(data);
@@ -109,14 +108,12 @@ export default function App() {
       const data = await getDbData();
       setDb(data);
     };
-    window.addEventListener('storage', handleStorageSync);
     window.addEventListener('custom-db-updated', handleStorageSync);
     window.addEventListener('custom-settings-updated', handleSettingsSync);
     window.addEventListener('popstate', handleRouteChange);
 
     return () => {
       mounted = false;
-      window.removeEventListener('storage', handleStorageSync);
       window.removeEventListener('custom-db-updated', handleStorageSync);
       window.removeEventListener('custom-settings-updated', handleSettingsSync);
       window.removeEventListener('popstate', handleRouteChange);

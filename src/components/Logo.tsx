@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getSetting, removeSetting, setSetting } from '../lib/settingsStore';
 
 interface LogoProps {
   layout?: 'icon-only' | 'column' | 'row';
@@ -15,32 +16,23 @@ export default function Logo({
   onDark = false,
   allowChange = true,
 }: LogoProps) {
-  // Store custom logo as Base64 image
+  // Store custom logo in the app settings cache; Supabase sync persists it.
   const [customLogo, setCustomLogo] = useState<string | null>(null);
 
   useEffect(() => {
     // Read on initial load
-    const stored = localStorage.getItem('custom_logo_base64');
+    const stored = getSetting('custom_logo_base64');
     if (stored) {
       setCustomLogo(stored);
     }
 
-    // Handlers for storage change and custom event
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'custom_logo_base64') {
-        setCustomLogo(e.newValue);
-      }
-    };
-
     const handleCustomChange = () => {
-      setCustomLogo(localStorage.getItem('custom_logo_base64'));
+      setCustomLogo(getSetting('custom_logo_base64'));
     };
 
-    window.addEventListener('storage', handleStorageChange);
     window.addEventListener('custom-logo-updated', handleCustomChange);
 
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('custom-logo-updated', handleCustomChange);
     };
   }, []);
@@ -51,8 +43,9 @@ export default function Logo({
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64String = reader.result as string;
-        localStorage.setItem('custom_logo_base64', base64String);
+        setSetting('custom_logo_base64', base64String);
         window.dispatchEvent(new Event('custom-logo-updated'));
+        window.dispatchEvent(new Event('custom-settings-updated'));
       };
       reader.readAsDataURL(file);
     }
@@ -60,8 +53,9 @@ export default function Logo({
 
   const handleResetLogo = (e: React.MouseEvent) => {
     e.stopPropagation();
-    localStorage.removeItem('custom_logo_base64');
+    removeSetting('custom_logo_base64');
     window.dispatchEvent(new Event('custom-logo-updated'));
+    window.dispatchEvent(new Event('custom-settings-updated'));
   };
 
   // Dimensions based on size property

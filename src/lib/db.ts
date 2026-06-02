@@ -158,34 +158,27 @@ const INITIAL_PAYMENTS: Payment[] = [
 ];
 
 const INITIAL_DOCUMENTS: CloudDocument[] = [];
+let memoryDbData: DbData | null = null;
 
 function hasDocumentPayload(document: CloudDocument) {
   return document.syncStatus !== 'synced' || Boolean(document.storagePath || document.dataUrl);
 }
 
 export function getLocalDbData(): DbData {
-  const prefix = localStorage.getItem('cc_storage_local_prefix') || 'cc_';
-  
-  const projectsKey = `${prefix}projects`;
-  const paymentsKey = `${prefix}payments`;
-  const contactsKey = `${prefix}contacts`;
-  const documentsKey = `${prefix}documents`;
-
-  const projects = localStorage.getItem(projectsKey);
-  const payments = localStorage.getItem(paymentsKey);
-  const contacts = localStorage.getItem(contactsKey);
-  const documents = localStorage.getItem(documentsKey);
-
-  if (!projects) localStorage.setItem(projectsKey, JSON.stringify(INITIAL_PROJECTS));
-  if (!payments) localStorage.setItem(paymentsKey, JSON.stringify(INITIAL_PAYMENTS));
-  if (!contacts) localStorage.setItem(contactsKey, JSON.stringify(INITIAL_CONTACTS));
-  if (!documents) localStorage.setItem(documentsKey, JSON.stringify(INITIAL_DOCUMENTS));
+  if (!memoryDbData) {
+    memoryDbData = {
+      projects: INITIAL_PROJECTS,
+      payments: INITIAL_PAYMENTS,
+      contacts: INITIAL_CONTACTS,
+      documents: INITIAL_DOCUMENTS,
+    };
+  }
 
   return {
-    projects: JSON.parse(localStorage.getItem(projectsKey) || JSON.stringify(INITIAL_PROJECTS)) as Project[],
-    payments: JSON.parse(localStorage.getItem(paymentsKey) || JSON.stringify(INITIAL_PAYMENTS)) as Payment[],
-    contacts: JSON.parse(localStorage.getItem(contactsKey) || JSON.stringify(INITIAL_CONTACTS)) as Contact[],
-    documents: (JSON.parse(localStorage.getItem(documentsKey) || JSON.stringify(INITIAL_DOCUMENTS)) as CloudDocument[]).filter(hasDocumentPayload),
+    projects: [...memoryDbData.projects],
+    payments: [...memoryDbData.payments],
+    contacts: [...memoryDbData.contacts],
+    documents: memoryDbData.documents.filter(hasDocumentPayload),
   };
 }
 
@@ -290,33 +283,12 @@ export async function getDbData(): Promise<DbData> {
 }
 
 function saveLocalDbData(data: DbData) {
-  const prefix = localStorage.getItem('cc_storage_local_prefix') || 'cc_';
-  localStorage.setItem(`${prefix}projects`, JSON.stringify(data.projects));
-  localStorage.setItem(`${prefix}payments`, JSON.stringify(data.payments));
-  localStorage.setItem(`${prefix}contacts`, JSON.stringify(data.contacts));
-  localStorage.setItem(`${prefix}documents`, JSON.stringify(data.documents));
-
-  // Background Cloud Sync if Storage type is set to Cloud REST API
-  const storageType = localStorage.getItem('cc_storage_type') || 'local';
-  if (storageType === 'cloud') {
-    const cloudUrl = localStorage.getItem('cc_storage_cloud_endpoint');
-    const cloudAuth = localStorage.getItem('cc_storage_cloud_auth') || '';
-    if (cloudUrl) {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (cloudAuth) {
-        headers['Authorization'] = cloudAuth.startsWith('Bearer ') ? cloudAuth : `Bearer ${cloudAuth}`;
-      }
-      fetch(cloudUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(data),
-      }).catch((err) => {
-        console.error('Core Background Cloud Sync failure:', err);
-      });
-    }
-  }
+  memoryDbData = {
+    projects: [...data.projects],
+    payments: [...data.payments],
+    contacts: [...data.contacts],
+    documents: [...data.documents],
+  };
 }
 
 function missingIds<T extends { id: string }>(previousRows: T[], nextRows: T[]) {

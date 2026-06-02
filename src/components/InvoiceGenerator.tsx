@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Project, Payment, Contact } from '../types';
 import Logo from './Logo';
 import { Printer, Mail, Send, CheckCircle2, CircleDollarSign, Plus, Trash2, Edit, Check, X, Eye, MessageSquare, Share2 } from 'lucide-react';
+import { getSetting } from '../lib/settingsStore';
 
 interface InvoiceGeneratorProps {
   project: Project;
@@ -126,7 +127,7 @@ export default function InvoiceGenerator({ project, payments, contacts }: Invoic
   };
 
   const handleShareWhatsApp = () => {
-    const firmName = localStorage.getItem('cc_company_name') || 'Catalyser Design';
+    const firmName = getSetting('cc_company_name') || 'Catalyser Design';
     const totalDue = totalWithTax.toLocaleString(undefined, { maximumFractionDigits: 2 });
     const balanceDue = outstandingBalanceDue.toLocaleString(undefined, { maximumFractionDigits: 2 });
     
@@ -479,11 +480,11 @@ Thank you for your business. Please let us know if you need any adjustments or b
 
           {/* Double Address Blocks */}
           {(() => {
-            const firmName = localStorage.getItem('cc_company_name') || 'Catalyser Design';
-            const firmAddress = localStorage.getItem('cc_company_address') || 'Unit number 809, 99 Avenue, Lullanagar, Pune - 411040';
-            const firmGstNum = localStorage.getItem('cc_company_gst') || '27AAECC4524C1Z9';
-            const firmEmail = localStorage.getItem('cc_company_email') || 'contact@catalyserdesign.com';
-            const firmPhone = localStorage.getItem('cc_company_phone') || '+91 98765 43210';
+            const firmName = getSetting('cc_company_name') || 'Catalyser Design';
+            const firmAddress = getSetting('cc_company_address') || 'Unit number 809, 99 Avenue, Lullanagar, Pune - 411040';
+            const firmGstNum = getSetting('cc_company_gst') || '27AAECC4524C1Z9';
+            const firmEmail = getSetting('cc_company_email') || 'contact@catalyserdesign.com';
+            const firmPhone = getSetting('cc_company_phone') || '+91 98765 43210';
 
             // Find matching client GST from Directory Contacts
             const clientContact = contacts.find(
@@ -577,11 +578,11 @@ Thank you for your business. Please let us know if you need any adjustments or b
 
           {/* Footer details including bank remittance credentials */}
           {(() => {
-            const bankAccName = localStorage.getItem('cc_bank_account_name') || 'Catalyser Design';
-            const bankName = localStorage.getItem('cc_bank_name') || 'HDFC Bank Ltd';
-            const bankAccNo = localStorage.getItem('cc_bank_account_number') || '50200012345678';
-            const bankAccType = localStorage.getItem('cc_bank_account_type') || 'Current';
-            const bankIfsc = localStorage.getItem('cc_bank_ifsc') || 'HDFC0001234';
+            const bankAccName = getSetting('cc_bank_account_name') || 'Catalyser Design';
+            const bankName = getSetting('cc_bank_name') || 'HDFC Bank Ltd';
+            const bankAccNo = getSetting('cc_bank_account_number') || '50200012345678';
+            const bankAccType = getSetting('cc_bank_account_type') || 'Current';
+            const bankIfsc = getSetting('cc_bank_ifsc') || 'HDFC0001234';
 
             return (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left border-t pt-4">
@@ -613,12 +614,12 @@ Thank you for your business. Please let us know if you need any adjustments or b
 
                   {/* Stamp & Authorized Signature block */}
                   {(() => {
-                    let stamp = localStorage.getItem('custom_stamp_base64');
+                    let stamp = getSetting('custom_stamp_base64');
                     if (!stamp) {
-                      stamp = localStorage.getItem('custom_stamp_sign_base64');
+                      stamp = getSetting('custom_stamp_sign_base64');
                     }
-                    const signature = localStorage.getItem('custom_sign_base64');
-                    const firmName = localStorage.getItem('cc_company_name') || 'Catalyser Design';
+                    const signature = getSetting('custom_sign_base64');
+                    const firmName = getSetting('cc_company_name') || 'Catalyser Design';
                     return (
                       <div className="flex flex-col items-end mt-4 pt-4 border-t border-slate-200/50">
                         <div className="text-right space-y-1">

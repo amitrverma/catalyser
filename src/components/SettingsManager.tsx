@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, ShieldCheck, Check, RotateCcw, AlertCircle, Sparkles, Building, KeyRound, MapPin, ReceiptText, Database, Cloud, RefreshCw, UploadCloud, DownloadCloud, FileDown, FileUp, Save, Server, Users, UserPlus, Trash2, Edit, Plus, X, Briefcase } from 'lucide-react';
-import { saveDbData } from '../lib/db';
+import { getDbData, saveDbData } from '../lib/db';
+import {
+  DEFAULT_COMPANY_SETTINGS,
+  DEFAULT_STAFF_SALARIES,
+  getSetting,
+  readJsonSetting,
+  removeSetting,
+  resetSettingsMemory,
+  setSetting,
+} from '../lib/settingsStore';
 
 export default function SettingsManager() {
   const [formData, setFormData] = useState({
@@ -29,12 +38,7 @@ export default function SettingsManager() {
 
   // Staff and salary directory list states
   const [staffList, setStaffList] = useState<Array<{ id: string; name: string; role: string; salary: number }>>(() => {
-    const saved = localStorage.getItem('cc_staff_salaries');
-    return saved ? JSON.parse(saved) : [
-      { id: 'st-1', name: 'Ar. Rohit Sharma', role: 'Senior Landscape Architect', salary: 55000 },
-      { id: 'st-2', name: 'Ananya Mehta', role: 'Interior & Space Designer', salary: 38000 },
-      { id: 'st-3', name: 'Kabir Verma', role: '3D Visualiser & Renderer', salary: 28000 }
-    ];
+    return readJsonSetting('cc_staff_salaries', DEFAULT_STAFF_SALARIES);
   });
 
   const [newStaffName, setNewStaffName] = useState('');
@@ -47,7 +51,7 @@ export default function SettingsManager() {
 
   const saveStaffList = (newList: Array<{ id: string; name: string; role: string; salary: number }>) => {
     setStaffList(newList);
-    localStorage.setItem('cc_staff_salaries', JSON.stringify(newList));
+    setSetting('cc_staff_salaries', JSON.stringify(newList));
     window.dispatchEvent(new Event('custom-settings-updated'));
   };
 
@@ -103,30 +107,30 @@ export default function SettingsManager() {
 
   // Load custom values on mount
   useEffect(() => {
-    const cName = localStorage.getItem('cc_company_name');
-    const cAddr = localStorage.getItem('cc_company_address');
-    const cGst = localStorage.getItem('cc_company_gst');
-    const cEmail = localStorage.getItem('cc_company_email');
-    const cPhone = localStorage.getItem('cc_company_phone');
-    const logo = localStorage.getItem('custom_logo_base64');
+    const cName = getSetting('cc_company_name');
+    const cAddr = getSetting('cc_company_address');
+    const cGst = getSetting('cc_company_gst');
+    const cEmail = getSetting('cc_company_email');
+    const cPhone = getSetting('cc_company_phone');
+    const logo = getSetting('custom_logo_base64');
     
     // Fallback support for any unified signature/stamp saved previously
-    let stamp = localStorage.getItem('custom_stamp_base64');
+    let stamp = getSetting('custom_stamp_base64');
     if (!stamp) {
-      stamp = localStorage.getItem('custom_stamp_sign_base64');
+      stamp = getSetting('custom_stamp_sign_base64');
     }
-    const signature = localStorage.getItem('custom_sign_base64');
+    const signature = getSetting('custom_sign_base64');
 
-    const sType = (localStorage.getItem('cc_storage_type') as 'local' | 'cloud') || 'local';
-    const sPrefix = localStorage.getItem('cc_storage_local_prefix') || 'cc_';
-    const sEndpoint = localStorage.getItem('cc_storage_cloud_endpoint') || '';
-    const sAuth = localStorage.getItem('cc_storage_cloud_auth') || '';
+    const sType = (getSetting('cc_storage_type') as 'local' | 'cloud') || 'local';
+    const sPrefix = getSetting('cc_storage_local_prefix') || 'cc_';
+    const sEndpoint = getSetting('cc_storage_cloud_endpoint') || '';
+    const sAuth = getSetting('cc_storage_cloud_auth') || '';
 
-    const bAccName = localStorage.getItem('cc_bank_account_name');
-    const bBankName = localStorage.getItem('cc_bank_name');
-    const bAccNo = localStorage.getItem('cc_bank_account_number');
-    const bAccType = localStorage.getItem('cc_bank_account_type');
-    const bIfsc = localStorage.getItem('cc_bank_ifsc');
+    const bAccName = getSetting('cc_bank_account_name');
+    const bBankName = getSetting('cc_bank_name');
+    const bAccNo = getSetting('cc_bank_account_number');
+    const bAccType = getSetting('cc_bank_account_type');
+    const bIfsc = getSetting('cc_bank_ifsc');
 
     setFormData({
       companyName: cName || 'Catalyser Design',
@@ -180,9 +184,9 @@ export default function SettingsManager() {
   const handleSaveLogo = () => {
     setLogoBase64(pendingLogo);
     if (pendingLogo) {
-      localStorage.setItem('custom_logo_base64', pendingLogo);
+      setSetting('custom_logo_base64', pendingLogo);
     } else {
-      localStorage.removeItem('custom_logo_base64');
+      removeSetting('custom_logo_base64');
     }
     window.dispatchEvent(new Event('custom-logo-updated'));
     window.dispatchEvent(new Event('custom-settings-updated'));
@@ -209,12 +213,12 @@ export default function SettingsManager() {
   const handleSaveStamp = () => {
     setStampBase64(pendingStamp);
     if (pendingStamp) {
-      localStorage.setItem('custom_stamp_base64', pendingStamp);
+      setSetting('custom_stamp_base64', pendingStamp);
       // Synchronize with the older unified key as fallback for other parts of system
-      localStorage.setItem('custom_stamp_sign_base64', pendingStamp);
+      setSetting('custom_stamp_sign_base64', pendingStamp);
     } else {
-      localStorage.removeItem('custom_stamp_base64');
-      localStorage.removeItem('custom_stamp_sign_base64');
+      removeSetting('custom_stamp_base64');
+      removeSetting('custom_stamp_sign_base64');
     }
     window.dispatchEvent(new Event('custom-stamp-updated'));
     window.dispatchEvent(new Event('custom-settings-updated'));
@@ -241,9 +245,9 @@ export default function SettingsManager() {
   const handleSaveSign = () => {
     setSignBase64(pendingSign);
     if (pendingSign) {
-      localStorage.setItem('custom_sign_base64', pendingSign);
+      setSetting('custom_sign_base64', pendingSign);
     } else {
-      localStorage.removeItem('custom_sign_base64');
+      removeSetting('custom_sign_base64');
     }
     window.dispatchEvent(new Event('custom-sign-updated'));
     window.dispatchEvent(new Event('custom-settings-updated'));
@@ -257,58 +261,29 @@ export default function SettingsManager() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem('cc_company_name', formData.companyName);
-    localStorage.setItem('cc_company_address', formData.address);
-    localStorage.setItem('cc_company_gst', formData.gstNumber);
-    localStorage.setItem('cc_company_email', formData.email);
-    localStorage.setItem('cc_company_phone', formData.phone);
-    localStorage.setItem('cc_bank_account_name', formData.bankAccountName);
-    localStorage.setItem('cc_bank_name', formData.bankName);
-    localStorage.setItem('cc_bank_account_number', formData.bankAccountNumber);
-    localStorage.setItem('cc_bank_account_type', formData.bankAccountType);
-    localStorage.setItem('cc_bank_ifsc', formData.bankIfscCode);
+    setSetting('cc_company_name', formData.companyName);
+    setSetting('cc_company_address', formData.address);
+    setSetting('cc_company_gst', formData.gstNumber);
+    setSetting('cc_company_email', formData.email);
+    setSetting('cc_company_phone', formData.phone);
+    setSetting('cc_bank_account_name', formData.bankAccountName);
+    setSetting('cc_bank_name', formData.bankName);
+    setSetting('cc_bank_account_number', formData.bankAccountNumber);
+    setSetting('cc_bank_account_type', formData.bankAccountType);
+    setSetting('cc_bank_ifsc', formData.bankIfscCode);
 
     // Dispatch event to announce update to other components immediately
     window.dispatchEvent(new Event('custom-settings-updated'));
-    localStorage.setItem('cc_settings_sync_trigger', Date.now().toString());
 
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 
   const handleResetDefaults = () => {
-    localStorage.setItem('cc_company_name', 'Catalyser Design');
-    localStorage.setItem('cc_company_address', 'Unit number 809, 99 Avenue, Lullanagar, Pune - 411040');
-    localStorage.setItem('cc_company_gst', '27AAECC4524C1Z9');
-    localStorage.setItem('cc_company_email', 'contact@catalyserdesign.com');
-    localStorage.setItem('cc_company_phone', '+91 98765 43210');
-    localStorage.setItem('cc_bank_account_name', 'Catalyser Design');
-    localStorage.setItem('cc_bank_name', 'HDFC Bank Ltd');
-    localStorage.setItem('cc_bank_account_number', '50200012345678');
-    localStorage.setItem('cc_bank_account_type', 'Current');
-    localStorage.setItem('cc_bank_ifsc', 'HDFC0001234');
-    localStorage.removeItem('custom_logo_base64');
-    localStorage.removeItem('custom_stamp_base64');
-    localStorage.removeItem('custom_stamp_sign_base64');
-    localStorage.removeItem('custom_sign_base64');
-    localStorage.removeItem('cc_staff_salaries');
-
-    localStorage.setItem('cc_storage_type', 'local');
-    localStorage.setItem('cc_storage_local_prefix', 'cc_');
-    localStorage.setItem('cc_storage_cloud_endpoint', '');
-    localStorage.setItem('cc_storage_cloud_auth', '');
+    resetSettingsMemory();
 
     setFormData({
-      companyName: 'Catalyser Design',
-      address: 'Unit number 809, 99 Avenue, Lullanagar, Pune - 411040',
-      gstNumber: '27AAECC4524C1Z9',
-      email: 'contact@catalyserdesign.com',
-      phone: '+91 98765 43210',
-      bankAccountName: 'Catalyser Design',
-      bankName: 'HDFC Bank Ltd',
-      bankAccountNumber: '50200012345678',
-      bankAccountType: 'Current',
-      bankIfscCode: 'HDFC0001234'
+      ...DEFAULT_COMPANY_SETTINGS
     });
     setLogoBase64(null);
     setStampBase64(null);
@@ -320,11 +295,7 @@ export default function SettingsManager() {
     setLocalPrefix('cc_');
     setCloudEndpoint('');
     setCloudAuth('');
-    setStaffList([
-      { id: 'st-1', name: 'Ar. Rohit Sharma', role: 'Senior Landscape Architect', salary: 55000 },
-      { id: 'st-2', name: 'Ananya Mehta', role: 'Interior & Space Designer', salary: 38000 },
-      { id: 'st-3', name: 'Kabir Verma', role: '3D Visualiser & Renderer', salary: 28000 }
-    ]);
+    setStaffList(DEFAULT_STAFF_SALARIES);
 
     window.dispatchEvent(new Event('custom-logo-updated'));
     window.dispatchEvent(new Event('custom-stamp-updated'));
@@ -337,10 +308,10 @@ export default function SettingsManager() {
 
   const handleSaveStorageSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem('cc_storage_type', storageType);
-    localStorage.setItem('cc_storage_local_prefix', localPrefix);
-    localStorage.setItem('cc_storage_cloud_endpoint', cloudEndpoint);
-    localStorage.setItem('cc_storage_cloud_auth', cloudAuth);
+    setSetting('cc_storage_type', storageType);
+    setSetting('cc_storage_local_prefix', localPrefix);
+    setSetting('cc_storage_cloud_endpoint', cloudEndpoint);
+    setSetting('cc_storage_cloud_auth', cloudAuth);
 
     // Dispatch event to announce update
     window.dispatchEvent(new Event('custom-db-updated'));
@@ -350,28 +321,17 @@ export default function SettingsManager() {
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 
-  const handleExportDB = () => {
-    const prefix = localStorage.getItem('cc_storage_local_prefix') || 'cc_';
-    const projects = localStorage.getItem(`${prefix}projects`);
-    const payments = localStorage.getItem(`${prefix}payments`);
-    const contacts = localStorage.getItem(`${prefix}contacts`);
-    const documents = localStorage.getItem(`${prefix}documents`);
-
+  const handleExportDB = async () => {
+    const data = await getDbData();
     const dbDump = {
       exportedAt: new Date().toISOString(),
-      storagePrefix: prefix,
-      data: {
-        projects: projects ? JSON.parse(projects) : [],
-        payments: payments ? JSON.parse(payments) : [],
-        contacts: contacts ? JSON.parse(contacts) : [],
-        documents: documents ? JSON.parse(documents) : []
-      }
+      data
     };
 
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dbDump, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `catalyser_vault_${prefix}_backup.json`);
+    downloadAnchor.setAttribute("download", `catalyser_workspace_backup.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -386,12 +346,6 @@ export default function SettingsManager() {
       try {
         const parsed = JSON.parse(event.target?.result as string);
         if (parsed && parsed.data && Array.isArray(parsed.data.projects)) {
-          const prefix = localPrefix || 'cc_';
-          
-          localStorage.setItem(`${prefix}projects`, JSON.stringify(parsed.data.projects));
-          localStorage.setItem(`${prefix}payments`, JSON.stringify(parsed.data.payments || []));
-          localStorage.setItem(`${prefix}contacts`, JSON.stringify(parsed.data.contacts || []));
-          localStorage.setItem(`${prefix}documents`, JSON.stringify(parsed.data.documents || []));
           void saveDbData({
             projects: parsed.data.projects,
             payments: parsed.data.payments || [],
@@ -402,7 +356,7 @@ export default function SettingsManager() {
           window.dispatchEvent(new Event('custom-db-updated'));
           window.dispatchEvent(new Event('custom-settings-updated'));
 
-          setImportStatus({ success: true, message: `Imported successfully to namespace "${prefix}"!` });
+          setImportStatus({ success: true, message: 'Imported successfully into workspace persistence.' });
         } else {
           setImportStatus({ success: false, message: 'Invalid payload structure. Make sure "data.projects" contains a valid list.' });
         }
@@ -445,13 +399,7 @@ export default function SettingsManager() {
       return;
     }
     try {
-      const prefix = localPrefix || 'cc_';
-      const data = {
-        projects: JSON.parse(localStorage.getItem(`${prefix}projects`) || '[]'),
-        payments: JSON.parse(localStorage.getItem(`${prefix}payments`) || '[]'),
-        contacts: JSON.parse(localStorage.getItem(`${prefix}contacts`) || '[]'),
-        documents: JSON.parse(localStorage.getItem(`${prefix}documents`) || '[]')
-      };
+      const data = await getDbData();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (cloudAuth) {
         headers['Authorization'] = cloudAuth.startsWith('Bearer ') ? cloudAuth : `Bearer ${cloudAuth}`;
@@ -491,11 +439,6 @@ export default function SettingsManager() {
         else if (info.record && Array.isArray(info.record.projects)) payload = info.record;
       }
       if (payload && Array.isArray(payload.projects)) {
-        const prefix = localPrefix || 'cc_';
-        localStorage.setItem(`${prefix}projects`, JSON.stringify(payload.projects));
-        localStorage.setItem(`${prefix}payments`, JSON.stringify(payload.payments || []));
-        localStorage.setItem(`${prefix}contacts`, JSON.stringify(payload.contacts || []));
-        localStorage.setItem(`${prefix}documents`, JSON.stringify(payload.documents || []));
         void saveDbData({
           projects: payload.projects,
           payments: payload.payments || [],
@@ -993,9 +936,9 @@ export default function SettingsManager() {
               </div>
               <div className="space-y-1">
                 <span className="text-[10px] font-mono tracking-wider font-bold text-slate-400 block uppercase">Audit Safe Security</span>
-                <h5 className="font-extrabold text-white text-xs">Local Storage</h5>
+                <h5 className="font-extrabold text-white text-xs">Enterprise Persistence</h5>
                 <p className="text-[10px] text-slate-405 leading-relaxed">
-                  All company settings are safely and privately locked within your browser’s isolated local sandbox filesystem. No unencrypted corporate financial identifiers leaving current endpoint.
+                  Company settings, payroll configuration, invoice assets, and workspace records persist through the configured Supabase database and private storage policies.
                 </p>
               </div>
             </div>
@@ -1200,7 +1143,7 @@ export default function SettingsManager() {
             </p>
           </div>
           <span className="hidden text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-mono uppercase tracking-wider shrink-0">
-            {storageType === 'local' ? 'Local storage' : 'Cloud storage'}
+            {storageType === 'local' ? 'Workspace database' : 'External sync'}
           </span>
         </div>
 
@@ -1216,7 +1159,7 @@ export default function SettingsManager() {
             }`}
           >
             <Server size={14} />
-            <span>Local Storage</span>
+            <span>Workspace Database</span>
           </button>
           <button
             type="button"
@@ -1228,7 +1171,7 @@ export default function SettingsManager() {
             }`}
           >
             <Cloud size={14} />
-            <span>Cloud Storage</span>
+            <span>External Sync</span>
           </button>
         </div>
 
@@ -1237,16 +1180,16 @@ export default function SettingsManager() {
             <div className="space-y-4 pt-1">
               <div className="hidden bg-slate-50 p-4 rounded-xl border border-slate-200/60 max-w-2xl text-[11px] text-slate-600 leading-relaxed space-y-2">
                 <p>
-                  <strong>Local storage:</strong> Records are saved in this browser. Use export/import when moving data to another device or browser.
+                  <strong>Workspace database:</strong> Records are loaded from and saved through the application persistence layer.
                 </p>
                 <p>
-                  Change the key prefix only if you intentionally want a separate local workspace.
+                  Export/import is available for controlled workspace backup and restore operations.
                 </p>
               </div>
 
               <div className="hidden space-y-1.5 max-w-md">
                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
-                  Storage Key Prefix
+                  Workspace Key Prefix
                 </label>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <input
@@ -1258,7 +1201,7 @@ export default function SettingsManager() {
                     className="flex-1 bg-slate-50 border border-slate-205 rounded-xl p-3 text-xs font-mono font-bold text-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 transition"
                   />
                   <div className="text-[10px] flex items-center text-slate-400 font-semibold italic bg-slate-100/50 px-3 py-2 sm:py-0 rounded-xl border">
-                    Saves as <code className="text-slate-700 ml-1.5 font-bold font-mono">{localPrefix}projects</code>
+                    Namespace <code className="text-slate-700 ml-1.5 font-bold font-mono">{localPrefix}</code>
                   </div>
                 </div>
               </div>
@@ -1309,13 +1252,13 @@ export default function SettingsManager() {
             <div className="space-y-4 pt-1">
               <div className="bg-blue-50/40 p-4 rounded-xl border border-blue-100 text-[11px] text-blue-800 leading-relaxed space-y-1 max-w-2xl">
                 <p className="font-extrabold flex items-center gap-1">
-                  <Cloud size={12} /> Cloud storage
+                  <Cloud size={12} /> External sync
                 </p>
                 <p>
-                  Connect a REST endpoint if you want the workspace to sync outside this browser.
+                  Connect a REST endpoint only for controlled migration or interoperability workflows.
                 </p>
                 <p className="text-slate-500">
-                  Use upload or download only when you need to move data between local and cloud storage.
+                  Use upload or download only when you need to move data between workspace persistence and an external endpoint.
                 </p>
               </div>
 
@@ -1354,7 +1297,7 @@ export default function SettingsManager() {
               <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
                 <div className="space-y-0.5">
                   <span className="font-bold text-slate-800 text-[11px] block">Sync Actions</span>
-                  <span className="text-[10px] text-slate-450 block">Test the connection or move data between local and cloud storage.</span>
+                  <span className="text-[10px] text-slate-450 block">Test the connection or move data between workspace persistence and an external endpoint.</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -1370,17 +1313,17 @@ export default function SettingsManager() {
                     type="button"
                     onClick={handlePushToCloud}
                     className="px-3.5 py-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer border-none text-xs"
-                    title="Upload local data"
+                    title="Upload workspace data"
                   >
                     <UploadCloud size={13} />
-                    <span>Upload Local Data</span>
+                    <span>Upload Workspace Data</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={handlePullFromCloud}
                     className="px-3.5 py-2 bg-slate-900 hover:bg-slate-850 text-white rounded-xl font-bold transition flex items-center gap-1 cursor-pointer border-none text-xs"
-                    title="Download cloud data into local storage"
+                    title="Download external data into workspace persistence"
                   >
                     <DownloadCloud size={13} />
                     <span>Download Cloud Data</span>
