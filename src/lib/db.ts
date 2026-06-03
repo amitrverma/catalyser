@@ -3,9 +3,19 @@ import { isSupabaseConfigured, supabase } from './supabase';
 import { ContactRow, DocumentRow, PaymentRow, ProjectRow } from './supabaseRows';
 import { ensureActiveOrganization } from './orgs';
 
+function createRecordId() {
+  return crypto.randomUUID();
+}
+
+const SEED_PROJECT_IDS = {
+  villaElixir: createRecordId(),
+  auraPenthouse: createRecordId(),
+  summitOffice: createRecordId(),
+} as const;
+
 const INITIAL_PROJECTS: Project[] = [
   {
-    id: 'proj-1',
+    id: SEED_PROJECT_IDS.villaElixir,
     name: 'Villa Elixir - Minimalist Residence',
     description: 'High-end 4-bedroom villa project focusing on minimalist concrete, cedar wood slats, and smart building features.',
     status: 'ongoing',
@@ -15,7 +25,7 @@ const INITIAL_PROJECTS: Project[] = [
     createdAt: '2026-03-12',
   },
   {
-    id: 'proj-2',
+    id: SEED_PROJECT_IDS.auraPenthouse,
     name: 'Aura Penthouse - Interior Renovation',
     description: 'Full luxury interior styling, acoustic wood panels, marble flooring, custom kitchen cabinets, and bespoke dimming fixtures.',
     status: 'completed',
@@ -25,7 +35,7 @@ const INITIAL_PROJECTS: Project[] = [
     createdAt: '2026-01-05',
   },
   {
-    id: 'proj-3',
+    id: SEED_PROJECT_IDS.summitOffice,
     name: 'Summit Office Lounge',
     description: 'Corporate lounge renovation, biophilic plant walls, custom glass partitions, and ergonomic workspace acoustics.',
     status: 'onhold',
@@ -38,24 +48,24 @@ const INITIAL_PROJECTS: Project[] = [
 
 const INITIAL_CONTACTS: Contact[] = [
   // Clients
-  { id: 'c-1', name: 'Sarah Jenkins', role: 'client', phone: '+1 (555) 234-9876', email: 'sjenkins@gmail.com', company: 'Jenkins LLC' },
-  { id: 'c-2', name: 'Arthur Vance', role: 'client', phone: '+1 (555) 762-3849', email: 'arthur.vance@vanceholdings.com', company: 'Vance Partners' },
-  { id: 'c-3', name: 'Elena Rostova', role: 'client', phone: '+1 (555) 432-8472', email: 'erostova@vertex.co', company: 'Vertex Group' },
+  { id: createRecordId(), name: 'Sarah Jenkins', role: 'client', phone: '+1 (555) 234-9876', email: 'sjenkins@gmail.com', company: 'Jenkins LLC' },
+  { id: createRecordId(), name: 'Arthur Vance', role: 'client', phone: '+1 (555) 762-3849', email: 'arthur.vance@vanceholdings.com', company: 'Vance Partners' },
+  { id: createRecordId(), name: 'Elena Rostova', role: 'client', phone: '+1 (555) 432-8472', email: 'erostova@vertex.co', company: 'Vertex Group' },
   // Vendors
-  { id: 'v-1', name: 'Elite Timber & Joinery', role: 'vendor', phone: '+1 (555) 901-2321', email: 'brian@elitetimber.com', company: 'Elite Timber' },
-  { id: 'v-2', name: 'Tesla Drywall & Acoustic', role: 'vendor', phone: '+1 (555) 890-4322', email: 'billing@teslaspaces.com', company: 'Tesla Drywall LLC' },
-  { id: 'v-3', name: 'Aero Duct & HVAC Services', role: 'vendor', phone: '+1 (555) 472-8392', email: 'service@aeroduct.com', company: 'Aero Duct Inc.' },
+  { id: createRecordId(), name: 'Elite Timber & Joinery', role: 'vendor', phone: '+1 (555) 901-2321', email: 'brian@elitetimber.com', company: 'Elite Timber' },
+  { id: createRecordId(), name: 'Tesla Drywall & Acoustic', role: 'vendor', phone: '+1 (555) 890-4322', email: 'billing@teslaspaces.com', company: 'Tesla Drywall LLC' },
+  { id: createRecordId(), name: 'Aero Duct & HVAC Services', role: 'vendor', phone: '+1 (555) 472-8392', email: 'service@aeroduct.com', company: 'Aero Duct Inc.' },
   // Material Suppliers
-  { id: 's-1', name: 'Sierra Plywood & Veneer', role: 'supplier', phone: '+1 (555) 123-4567', email: 'orders@sierraplywood.com', company: 'Sierra Forest Products' },
-  { id: 's-2', name: 'Pacific Marble & Granite', role: 'supplier', phone: '+1 (555) 987-6543', email: 'showroom@pacificmarble.com', company: 'Pacific Stone Group' },
-  { id: 's-3', name: 'Metropolis Iron & Rebar', role: 'supplier', phone: '+1 (555) 456-7890', email: 'sales@metroiron.com', company: 'Metropolis Steel Ltd' }
+  { id: createRecordId(), name: 'Sierra Plywood & Veneer', role: 'supplier', phone: '+1 (555) 123-4567', email: 'orders@sierraplywood.com', company: 'Sierra Forest Products' },
+  { id: createRecordId(), name: 'Pacific Marble & Granite', role: 'supplier', phone: '+1 (555) 987-6543', email: 'showroom@pacificmarble.com', company: 'Pacific Stone Group' },
+  { id: createRecordId(), name: 'Metropolis Iron & Rebar', role: 'supplier', phone: '+1 (555) 456-7890', email: 'sales@metroiron.com', company: 'Metropolis Steel Ltd' }
 ];
 
 const INITIAL_PAYMENTS: Payment[] = [
   // Villa Elixir
   {
-    id: 'pay-1',
-    projectId: 'proj-1',
+    id: createRecordId(),
+    projectId: SEED_PROJECT_IDS.villaElixir,
     type: 'in',
     amount: 150000,
     party: 'Sarah Jenkins',
@@ -65,8 +75,8 @@ const INITIAL_PAYMENTS: Payment[] = [
     date: '2026-03-15',
   },
   {
-    id: 'pay-2',
-    projectId: 'proj-1',
+    id: createRecordId(),
+    projectId: SEED_PROJECT_IDS.villaElixir,
     type: 'in',
     amount: 100000,
     party: 'Sarah Jenkins',
@@ -76,8 +86,8 @@ const INITIAL_PAYMENTS: Payment[] = [
     date: '2026-04-18',
   },
   {
-    id: 'pay-3',
-    projectId: 'proj-1',
+    id: createRecordId(),
+    projectId: SEED_PROJECT_IDS.villaElixir,
     type: 'out',
     amount: 35000,
     party: 'Elite Timber & Joinery',
@@ -88,8 +98,8 @@ const INITIAL_PAYMENTS: Payment[] = [
     billPhoto: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500" width="100%" height="100%"><rect width="100%" height="100%" fill="%23f8fafc" rx="16"/><rect x="20" y="20" width="360" height="460" fill="%23ffffff" rx="12" stroke="%23e2e8f0" stroke-width="2"/><rect x="40" y="40" width="40" height="40" fill="%23f59e0b" rx="8"/><text x="48" y="66" font-family="sans-serif" font-weight="950" font-size="22" fill="%23ffffff">E</text><text x="92" y="58" font-family="sans-serif" font-weight="bold" font-size="14" fill="%231e293b">ELITE TIMBER &amp; JOINERY</text><text x="92" y="73" font-family="sans-serif" font-size="10" fill="%2364748b">Tax Invoice %23ET-9921</text><line x1="40" y1="100" x2="360" y2="100" stroke="%23f1f5f9" stroke-width="2"/><text x="40" y="130" font-family="sans-serif" font-weight="bold" font-size="10" fill="%2394a3b8">BILLED TO:</text><text x="40" y="146" font-family="sans-serif" font-weight="bold" font-size="12" fill="%23334155">Alpha Construction Ltd</text><text x="220" y="130" font-family="sans-serif" font-weight="bold" font-size="10" fill="%2394a3b8">DATE OF ISSUE:</text><text x="220" y="146" font-family="sans-serif" font-size="11" fill="%23334155">2026-04-22</text><rect x="40" y="180" width="320" height="30" fill="%23f8fafc" rx="6"/><text x="50" y="199" font-family="sans-serif" font-weight="bold" font-size="10" fill="%23475569">Item &amp; Description</text><text x="340" y="199" font-family="sans-serif" font-weight="bold" font-size="10" fill="%23475569" text-anchor="end">Total</text><text x="50" y="240" font-family="sans-serif" font-weight="bold" font-size="11" fill="%23334155">Bespoke Cedar Support columns</text><text x="50" y="255" font-family="sans-serif" font-size="9" fill="%2394a3b8">Premium structural grade timber</text><text x="340" y="245" font-family="sans-serif" font-weight="bold" font-size="11" fill="%231e293b" text-anchor="end">₹35,000</text><line x1="40" y1="290" x2="360" y2="290" stroke="%23f1f5f9" stroke-width="1"/><text x="240" y="320" font-family="sans-serif" font-weight="bold" font-size="11" fill="%23475569">Subtotal:</text><text x="340" y="320" font-family="sans-serif" font-weight="bold" font-size="11" fill="%23334155" text-anchor="end">₹35,000</text><text x="240" y="340" font-family="sans-serif" font-size="11" fill="%23475569">Tax GST (0%):</text><text x="340" y="340" font-family="sans-serif" font-size="11" fill="%23334155" text-anchor="end">₹0</text><line x1="240" y1="355" x2="360" y2="355" stroke="%23cbd5e1" stroke-width="1"/><text x="240" y="380" font-family="sans-serif" font-weight="900" font-size="14" fill="%231e293b">TOTAL DUE:</text><text x="340" y="380" font-family="sans-serif" font-weight="900" font-size="14" fill="%23059669" text-anchor="end">₹35,000</text><rect x="40" y="415" width="150" height="35" fill="none" stroke="%2310b981" stroke-width="2" stroke-dasharray="4 2" rx="6"/><text x="115" y="437" font-family="sans-serif" font-weight="900" font-size="11" fill="%2310b981" text-anchor="middle">PAID &amp; COMPLETED</text></svg>`,
   },
   {
-    id: 'pay-4',
-    projectId: 'proj-1',
+    id: createRecordId(),
+    projectId: SEED_PROJECT_IDS.villaElixir,
     type: 'out',
     amount: 62000,
     party: 'Sierra Plywood & Veneer',
@@ -101,8 +111,8 @@ const INITIAL_PAYMENTS: Payment[] = [
   },
   // Aura Penthouse
   {
-    id: 'pay-5',
-    projectId: 'proj-2',
+    id: createRecordId(),
+    projectId: SEED_PROJECT_IDS.auraPenthouse,
     type: 'in',
     amount: 90000,
     party: 'Arthur Vance',
@@ -112,8 +122,8 @@ const INITIAL_PAYMENTS: Payment[] = [
     date: '2026-01-08',
   },
   {
-    id: 'pay-6',
-    projectId: 'proj-2',
+    id: createRecordId(),
+    projectId: SEED_PROJECT_IDS.auraPenthouse,
     type: 'in',
     amount: 90000,
     party: 'Arthur Vance',
@@ -123,8 +133,8 @@ const INITIAL_PAYMENTS: Payment[] = [
     date: '2026-02-28',
   },
   {
-    id: 'pay-7',
-    projectId: 'proj-2',
+    id: createRecordId(),
+    projectId: SEED_PROJECT_IDS.auraPenthouse,
     type: 'out',
     amount: 42000,
     party: 'Tesla Drywall & Acoustic',
@@ -134,8 +144,8 @@ const INITIAL_PAYMENTS: Payment[] = [
     date: '2026-01-20',
   },
   {
-    id: 'pay-8',
-    projectId: 'proj-2',
+    id: createRecordId(),
+    projectId: SEED_PROJECT_IDS.auraPenthouse,
     type: 'out',
     amount: 58000,
     party: 'Pacific Marble & Granite',
@@ -145,8 +155,8 @@ const INITIAL_PAYMENTS: Payment[] = [
     date: '2026-01-25',
   },
   {
-    id: 'pay-9',
-    projectId: 'proj-2',
+    id: createRecordId(),
+    projectId: SEED_PROJECT_IDS.auraPenthouse,
     type: 'out',
     amount: 15000,
     party: 'Aero Duct & HVAC Services',
@@ -368,12 +378,12 @@ async function throwOnSupabaseError(operation: PromiseLike<{ error: unknown }>) 
   }
 }
 
-export async function saveDbData(data: DbData) {
+export async function saveDbData(data: DbData): Promise<boolean> {
   const previousLocalData = getLocalDbData();
   saveLocalDbData(data);
 
   if (!isSupabaseConfigured || !supabase) {
-    return;
+    return true;
   }
 
   const {
@@ -381,7 +391,7 @@ export async function saveDbData(data: DbData) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return;
+    return true;
   }
 
   const activeOrg = await ensureActiveOrganization();
@@ -418,7 +428,9 @@ export async function saveDbData(data: DbData) {
     await Promise.all(deletions.map((operation) => throwOnSupabaseError(operation as PromiseLike<{ error: unknown }>)));
     await Promise.all(parentUpserts.map((operation) => throwOnSupabaseError(operation as PromiseLike<{ error: unknown }>)));
     await Promise.all(childUpserts.map((operation) => throwOnSupabaseError(operation as PromiseLike<{ error: unknown }>)));
+    return true;
   } catch (error) {
     console.error('Supabase save failed:', error);
+    return false;
   }
 }

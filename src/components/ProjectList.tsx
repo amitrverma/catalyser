@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Project, ProjectStatus, Payment } from '../types';
 import { formatCurrency, formatDate } from '../lib/formatter';
-import { Plus, FolderPlus, MapPin, Calendar, User, Search, Layers, ArrowRight } from 'lucide-react';
+import { Plus, FolderPlus, MapPin, Calendar, User, Search, Layers, ArrowRight, Check } from 'lucide-react';
 
 interface ProjectListProps {
   projects: Project[];
@@ -25,8 +25,21 @@ export default function ProjectList({
   const [clientName, setClientName] = useState('');
   const [address, setAddress] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilters, setStatusFilters] = useState<ProjectStatus[]>(['ongoing', 'completed', 'onhold']);
+  const [showStatusFilters, setShowStatusFilters] = useState(false);
   const [openStatusMenuId, setOpenStatusMenuId] = useState<string | null>(null);
+  const statusFilterOptions: Array<{ value: ProjectStatus; label: string }> = [
+    { value: 'ongoing', label: 'Ongoing' },
+    { value: 'completed', label: 'Completed' },
+    { value: 'onhold', label: 'On Hold' },
+  ];
+  const allStatusesSelected = statusFilters.length === statusFilterOptions.length;
+  const statusFilterLabel = allStatusesSelected
+    ? 'All Projects'
+    : statusFilterOptions
+        .filter((status) => statusFilters.includes(status.value))
+        .map((status) => status.label)
+        .join(', ') || 'No Status';
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,9 +67,17 @@ export default function ProjectList({
       proj.clientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (proj.address && proj.address.toLowerCase().includes(searchQuery.toLowerCase()));
 
-    if (statusFilter === 'all') return matchesSearch;
-    return matchesSearch && proj.status === statusFilter;
+    if (statusFilters.length === 0) return false;
+    return matchesSearch && statusFilters.includes(proj.status);
   });
+
+  const toggleStatusFilter = (status: ProjectStatus) => {
+    setStatusFilters((current) =>
+      current.includes(status)
+        ? current.filter((item) => item !== status)
+        : [...current, status],
+    );
+  };
 
   return (
     <div className="space-y-6" id="projects-view">
@@ -73,18 +94,52 @@ export default function ProjectList({
           />
         </div>
         
-        <div className="flex gap-2">
-          {/* Status Quick Filter toggling */}
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-600 shadow-xs focus:outline-none"
-          >
-            <option value="all">All Projects</option>
-            <option value="ongoing">Ongoing</option>
-            <option value="completed">Completed</option>
-            <option value="onhold">On Hold</option>
-          </select>
+        <div className="flex flex-wrap gap-2">
+          <div className="relative min-w-0 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowStatusFilters((current) => !current)}
+              className="flex h-full w-[132px] sm:w-[190px] items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left text-xs font-semibold text-slate-600 shadow-xs focus:outline-none cursor-pointer"
+              aria-haspopup="menu"
+              aria-expanded={showStatusFilters}
+            >
+              <span className="truncate">{statusFilterLabel}</span>
+              <span className="text-[10px] leading-none">v</span>
+            </button>
+            {showStatusFilters && (
+              <div className="absolute left-0 top-11 z-30 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg sm:left-auto sm:right-0 sm:w-44">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStatusFilters(allStatusesSelected ? [] : statusFilterOptions.map((status) => status.value))
+                  }
+                  className="flex w-full items-center justify-between border-none bg-white px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-blue-50 cursor-pointer"
+                  role="menuitemcheckbox"
+                  aria-checked={allStatusesSelected}
+                >
+                  <span>All Projects</span>
+                  {allStatusesSelected && <Check size={13} className="text-[#00509e]" />}
+                </button>
+                <div className="my-1 h-px bg-slate-100" />
+                {statusFilterOptions.map((status) => {
+                  const isSelected = statusFilters.includes(status.value);
+                  return (
+                    <button
+                      key={status.value}
+                      type="button"
+                      onClick={() => toggleStatusFilter(status.value)}
+                      className="flex w-full items-center justify-between border-none bg-white px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-blue-50 cursor-pointer"
+                      role="menuitemcheckbox"
+                      aria-checked={isSelected}
+                    >
+                      <span>{status.label}</span>
+                      {isSelected && <Check size={13} className="text-[#00509e]" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           
           <button
             onClick={() => setShowAddForm(true)}

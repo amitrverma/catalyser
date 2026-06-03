@@ -8,7 +8,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Project, Payment, Contact, CloudDocument, ProjectStatus, PaymentType, DocumentCategory, DbData, ContactRole } from './types';
 import { getDbData, saveDbData } from './lib/db';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
@@ -55,8 +55,13 @@ function pathForTab(tab: HomeTab): string {
   return tab === 'projects' ? '/projects' : `/${tab}`;
 }
 
+function createRecordId() {
+  return crypto.randomUUID();
+}
+
 export default function App() {
   const [db, setDb] = useState<DbData | null>(null);
+  const pendingSaveRef = useRef<Promise<boolean>>(Promise.resolve(true));
 
   // View state controllers
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => routeFromPath(window.location.pathname).selectedProjectId);
@@ -121,10 +126,12 @@ export default function App() {
   }, []);
 
   // Sync state helpers
-  const saveState = (updatedDb: typeof db) => {
-    if (!updatedDb) return;
+  const saveState = (updatedDb: typeof db): Promise<boolean> => {
+    if (!updatedDb) return Promise.resolve(false);
     setDb(updatedDb);
-    void saveDbData(updatedDb);
+    const savePromise = saveDbData(updatedDb);
+    pendingSaveRef.current = savePromise;
+    return savePromise;
   };
 
   if (!db) {
@@ -153,7 +160,7 @@ export default function App() {
     address: string
   ) => {
     const newProj: Project = {
-      id: `proj-${Date.now()}`,
+      id: createRecordId(),
       name,
       description,
       status: 'ongoing',
@@ -165,7 +172,7 @@ export default function App() {
 
     // Auto-create client contact when adding project to save time on-site!
     const newClientContact: Contact = {
-      id: `c-${Date.now()}`,
+      id: createRecordId(),
       name: clientName,
       role: 'client',
       phone: '',
@@ -195,7 +202,7 @@ export default function App() {
 
   const handleAddPayment = (paymentData: Omit<Payment, 'id'>) => {
     const newPay: Payment = {
-      id: `pay-${Date.now()}`,
+      id: createRecordId(),
       ...paymentData,
     };
 
@@ -240,7 +247,7 @@ export default function App() {
     address?: string
   ) => {
     const newContact: Contact = {
-      id: `c-${Date.now()}`,
+      id: createRecordId(),
       name,
       role,
       phone,
@@ -267,11 +274,10 @@ export default function App() {
       gstNumber?: string;
       address?: string;
     }>
-  ) => {
-    if (contactInputs.length === 0) return;
-    const timestamp = Date.now();
-    const newContacts: Contact[] = contactInputs.map((contact, index) => ({
-      id: `c-${timestamp}-${index}`,
+  ): Promise<boolean> => {
+    if (contactInputs.length === 0) return Promise.resolve(true);
+    const newContacts: Contact[] = contactInputs.map((contact) => ({
+      id: createRecordId(),
       name: contact.name,
       role: contact.role,
       phone: contact.phone,
@@ -285,7 +291,18 @@ export default function App() {
       ...db,
       contacts: [...newContacts, ...db.contacts],
     };
-    saveState(updated);
+    return saveState(updated);
+  };
+
+  const handleSignOut = async () => {
+    const synced = await pendingSaveRef.current;
+    if (!synced) {
+      alert('Your latest changes have not synced to the cloud yet. Please try again before signing out.');
+      return;
+    }
+    if (isSupabaseConfigured && supabase) {
+      await supabase.auth.signOut();
+    }
   };
 
   const handleUpdateContactRole = (contactId: string, role: ContactRole) => {
@@ -294,6 +311,35 @@ export default function App() {
       contacts: db.contacts.map((contact) => (contact.id === contactId ? { ...contact, role } : contact)),
     };
     saveState(updated);
+  };
+
+  const handleUpdateContact = (
+    contactId: string,
+    contactData: {
+      name: string;
+      role: ContactRole;
+      phone: string;
+      email: string;
+      company: string;
+      gstNumber?: string;
+      address?: string;
+    },
+  ): Promise<boolean> => {
+    const updated = {
+      ...db,
+      contacts: db.contacts.map((contact) =>
+        contact.id === contactId
+          ? {
+              ...contact,
+              ...contactData,
+              company: contactData.company || undefined,
+              gstNumber: contactData.gstNumber || undefined,
+              address: contactData.address || undefined,
+            }
+          : contact,
+      ),
+    };
+    return saveState(updated);
   };
 
   const handleDeleteContact = (contactId: string) => {
@@ -314,10 +360,15 @@ export default function App() {
 
   // Automated sync pipeline simulation
   const handleAddDocument = (file: File, category: DocumentCategory) => {
-    const docId = `doc-${Date.now()}`;
+    if (!selectedProjectId) {
+      alert('Select a project before uploading documents.');
+      return;
+    }
+
+    const docId = createRecordId();
     const newDoc: CloudDocument = {
       id: docId,
-      projectId: selectedProjectId || 'unassigned',
+      projectId: selectedProjectId,
       name: file.name,
       category,
       size: file.size,
@@ -587,7 +638,7 @@ export default function App() {
                 </div>
                 {isSupabaseConfigured && supabase ? (
                   <button
-                    onClick={() => void supabase.auth.signOut()}
+                    onClick={() => void handleSignOut()}
                     className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                     title="Sign out"
                   >
@@ -620,6 +671,7 @@ export default function App() {
             onEditPayment={handleEditPayment}
             onAddContact={handleAddContact}
             onAddContacts={handleAddContacts}
+            onUpdateContact={handleUpdateContact}
             onUpdateContactRole={handleUpdateContactRole}
             onAddDocument={handleAddDocument}
             onDeleteDocument={handleDeleteDocument}
@@ -670,6 +722,7 @@ export default function App() {
                     onAddContact={handleAddContact}
                     onDeleteContact={handleDeleteContact}
                     onAddContacts={handleAddContacts}
+                    onUpdateContact={handleUpdateContact}
                     onUpdateContactRole={handleUpdateContactRole}
                     payments={db.payments}
                     projects={db.projects}

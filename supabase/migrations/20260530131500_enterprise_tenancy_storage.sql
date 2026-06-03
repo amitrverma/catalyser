@@ -7,10 +7,10 @@ alter table public.company_settings drop constraint if exists company_settings_p
 alter table public.staff_salaries drop constraint if exists staff_salaries_pkey;
 
 create unique index if not exists company_settings_user_org_uidx
-on public.company_settings(user_id, org_id);
+on public.company_settings(user_id, org_id) nulls not distinct;
 
 create unique index if not exists staff_salaries_user_org_uidx
-on public.staff_salaries(user_id, org_id);
+on public.staff_salaries(user_id, org_id) nulls not distinct;
 
 create or replace function public.ensure_personal_organization()
 returns uuid

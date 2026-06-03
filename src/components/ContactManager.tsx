@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Contact, ContactRole, Payment, Project } from '../types';
 import { formatDate } from '../lib/formatter';
 import { CONTACT_ROLE_OPTIONS, getContactRoleConfig } from '../lib/roleLabels';
-import { Plus, User, Phone, Mail, Building2, UserCheck, Trash2, ShieldCheck, Tag, Receipt, ArrowUpRight, UserPlus } from 'lucide-react';
+import { Plus, User, Phone, Mail, Building2, UserCheck, Receipt, UserPlus, Edit2, Check, X } from 'lucide-react';
 
 type ContactInput = {
   name: string;
@@ -13,6 +13,8 @@ type ContactInput = {
   gstNumber?: string;
   address?: string;
 };
+
+type ContactUpdate = ContactInput;
 
 type PickedContact = {
   name?: string[];
@@ -29,7 +31,8 @@ type NavigatorWithContacts = Navigator & {
 interface ContactManagerProps {
   contacts: Contact[];
   onAddContact: (name: string, role: ContactRole, phone: string, email: string, company: string, gstNumber?: string, address?: string) => void;
-  onAddContacts?: (contacts: ContactInput[]) => void;
+  onAddContacts?: (contacts: ContactInput[]) => Promise<boolean> | boolean | void;
+  onUpdateContact?: (contactId: string, contact: ContactUpdate) => Promise<boolean> | boolean | void;
   onUpdateContactRole?: (contactId: string, role: ContactRole) => void;
   onDeleteContact?: (contactId: string) => void;
   payments?: Payment[];
@@ -40,6 +43,7 @@ export default function ContactManager({
   contacts,
   onAddContact,
   onAddContacts,
+  onUpdateContact,
   onUpdateContactRole,
   onDeleteContact,
   payments = [],
@@ -58,6 +62,16 @@ export default function ContactManager({
   const [selectedContactId, setSelectedContactId] = useState<string | null>(contacts[0]?.id || null);
   const [selectedContactForLedger, setSelectedContactForLedger] = useState<Contact | null>(null);
   const [importStatus, setImportStatus] = useState('');
+  const [editingContactId, setEditingContactId] = useState<string | null>(null);
+  const [editContact, setEditContact] = useState<ContactUpdate>({
+    name: '',
+    role: 'other',
+    phone: '',
+    email: '',
+    company: '',
+    gstNumber: '',
+    address: '',
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,14 +118,20 @@ export default function ContactManager({
         return;
       }
 
+      setImportStatus(`Saving ${importedContacts.length} imported contact${importedContacts.length !== 1 ? 's' : ''}...`);
+
       if (onAddContacts) {
-        onAddContacts(importedContacts);
+        const saved = await onAddContacts(importedContacts);
+        if (saved === false) {
+          setImportStatus('Imported locally, but cloud sync failed. Please stay signed in and try again.');
+          return;
+        }
       } else {
         importedContacts.forEach((contact) => {
           onAddContact(contact.name, contact.role, contact.phone, contact.email, contact.company);
         });
       }
-      setImportStatus(`Imported ${importedContacts.length} contact${importedContacts.length !== 1 ? 's' : ''} as Other.`);
+      setImportStatus(`Imported and saved ${importedContacts.length} contact${importedContacts.length !== 1 ? 's' : ''} as Other.`);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         setImportStatus('Contact import cancelled.');
@@ -119,6 +139,42 @@ export default function ContactManager({
       }
       setImportStatus('Unable to import contacts from this browser.');
     }
+  };
+
+  const startEditingContact = (contact: Contact) => {
+    setEditingContactId(contact.id);
+    setEditContact({
+      name: contact.name,
+      role: contact.role,
+      phone: contact.phone,
+      email: contact.email,
+      company: contact.company || '',
+      gstNumber: contact.gstNumber || '',
+      address: contact.address || '',
+    });
+  };
+
+  const handleEditSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingContactId || !editContact.name.trim() || !onUpdateContact) return;
+
+    const saved = await onUpdateContact(editingContactId, {
+      name: editContact.name.trim(),
+      role: editContact.role,
+      phone: editContact.phone.trim(),
+      email: editContact.email.trim(),
+      company: editContact.company.trim(),
+      gstNumber: editContact.gstNumber?.trim() || undefined,
+      address: editContact.address?.trim() || undefined,
+    });
+
+    if (saved === false) {
+      setImportStatus('Contact updated locally, but cloud sync failed. Please try again before signing out.');
+      return;
+    }
+
+    setEditingContactId(null);
+    setImportStatus('Contact updated and saved.');
   };
 
   // Filter contacts
@@ -225,7 +281,7 @@ export default function ContactManager({
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Directory Classification</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Role</label>
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as ContactRole)}
@@ -390,6 +446,15 @@ export default function ContactManager({
                     <p className="mt-0.5 truncate text-xs text-slate-500">{c.company || 'No company added'}</p>
                   </div>
                   <div className="flex flex-wrap gap-2 xl:justify-end">
+                    {onUpdateContact && (
+                      <button
+                        type="button"
+                        onClick={() => startEditingContact(c)}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer inline-flex items-center gap-1.5"
+                      >
+                        <Edit2 size={13} /> Edit
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setSelectedContactForLedger(c)}
@@ -412,43 +477,136 @@ export default function ContactManager({
 
               <div className="grid grid-cols-1 xl:grid-cols-5 gap-0">
                 <div className="xl:col-span-2 border-b xl:border-b-0 xl:border-r border-slate-100 p-4 space-y-3">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Contact Details</span>
-                    <div className="mt-2 space-y-2 text-xs">
-                      <div className="flex gap-2 text-slate-700">
-                        <Phone size={15} className="mt-0.5 shrink-0 text-slate-400" />
-                        <span>{c.phone || 'No phone added'}</span>
+                  {editingContactId === c.id ? (
+                    <form onSubmit={handleEditSubmit} className="space-y-3">
+                      <div className="grid grid-cols-1 gap-2">
+                        <label className="space-y-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Name</span>
+                          <input
+                            type="text"
+                            required
+                            value={editContact.name}
+                            onChange={(event) => setEditContact((current) => ({ ...current, name: event.target.value }))}
+                            className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Role</span>
+                          <select
+                            value={editContact.role}
+                            onChange={(event) => setEditContact((current) => ({ ...current, role: event.target.value as ContactRole }))}
+                            className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          >
+                            {CONTACT_ROLE_OPTIONS.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.selectLabel}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="space-y-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Phone</span>
+                          <input
+                            type="text"
+                            value={editContact.phone}
+                            onChange={(event) => setEditContact((current) => ({ ...current, phone: event.target.value }))}
+                            className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Email</span>
+                          <input
+                            type="email"
+                            value={editContact.email}
+                            onChange={(event) => setEditContact((current) => ({ ...current, email: event.target.value }))}
+                            className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Company</span>
+                          <input
+                            type="text"
+                            value={editContact.company}
+                            onChange={(event) => setEditContact((current) => ({ ...current, company: event.target.value }))}
+                            className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">GST Number</span>
+                          <input
+                            type="text"
+                            value={editContact.gstNumber || ''}
+                            onChange={(event) => setEditContact((current) => ({ ...current, gstNumber: event.target.value }))}
+                            className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs font-semibold uppercase focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Address</span>
+                          <input
+                            type="text"
+                            value={editContact.address || ''}
+                            onChange={(event) => setEditContact((current) => ({ ...current, address: event.target.value }))}
+                            className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </label>
                       </div>
-                      <div className="flex gap-2 text-slate-700">
-                        <Mail size={15} className="mt-0.5 shrink-0 text-slate-400" />
-                        <span className="break-all">{c.email || 'No email added'}</span>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditingContactId(null)}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-50 cursor-pointer"
+                        >
+                          <X size={13} /> Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="inline-flex items-center gap-1.5 rounded-lg border-none bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500 cursor-pointer"
+                        >
+                          <Check size={13} /> Save
+                        </button>
                       </div>
-                      <div className="flex gap-2 text-slate-700">
-                        <Building2 size={15} className="mt-0.5 shrink-0 text-slate-400" />
-                        <span>{c.address || 'No address added'}</span>
+                    </form>
+                  ) : (
+                    <>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Contact Details</span>
+                        <div className="mt-2 space-y-2 text-xs">
+                          <div className="flex gap-2 text-slate-700">
+                            <Phone size={15} className="mt-0.5 shrink-0 text-slate-400" />
+                            <span>{c.phone || 'No phone added'}</span>
+                          </div>
+                          <div className="flex gap-2 text-slate-700">
+                            <Mail size={15} className="mt-0.5 shrink-0 text-slate-400" />
+                            <span className="break-all">{c.email || 'No email added'}</span>
+                          </div>
+                          <div className="flex gap-2 text-slate-700">
+                            <Building2 size={15} className="mt-0.5 shrink-0 text-slate-400" />
+                            <span>{c.address || 'No address added'}</span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Role Category</label>
-                    <select
-                      value={c.role}
-                      onChange={(event) => onUpdateContactRole?.(c.id, event.target.value as ContactRole)}
-                      disabled={!onUpdateContactRole}
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {CONTACT_ROLE_OPTIONS.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.selectLabel}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {c.gstNumber && (
-                    <div className="rounded-lg border border-blue-100 bg-blue-50 p-2.5">
-                      <span className="block text-[10px] font-bold uppercase tracking-wide text-[#00509e]">GSTIN</span>
-                      <span className="mt-1 block font-mono text-xs font-bold text-slate-800">{c.gstNumber}</span>
-                    </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Role</label>
+                        <select
+                          value={c.role}
+                          onChange={(event) => onUpdateContactRole?.(c.id, event.target.value as ContactRole)}
+                          disabled={!onUpdateContactRole}
+                          className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {CONTACT_ROLE_OPTIONS.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.selectLabel}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {c.gstNumber && (
+                        <div className="rounded-lg border border-blue-100 bg-blue-50 p-2.5">
+                          <span className="block text-[10px] font-bold uppercase tracking-wide text-[#00509e]">GSTIN</span>
+                          <span className="mt-1 block font-mono text-xs font-bold text-slate-800">{c.gstNumber}</span>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
 

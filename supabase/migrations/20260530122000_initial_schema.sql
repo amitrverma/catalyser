@@ -10,7 +10,7 @@ create table if not exists public.profiles (
 );
 
 create table if not exists public.projects (
-  id text primary key,
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   name text not null,
   description text not null default '',
@@ -23,7 +23,7 @@ create table if not exists public.projects (
 );
 
 create table if not exists public.contacts (
-  id text primary key,
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   name text not null,
   role text not null check (role in ('client', 'vendor', 'supplier', 'contractor', 'site_worker', 'other')),
@@ -37,9 +37,9 @@ create table if not exists public.contacts (
 );
 
 create table if not exists public.payments (
-  id text primary key,
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  project_id text not null,
+  project_id uuid not null references public.projects(id) on delete cascade,
   type text not null check (type in ('in', 'out')),
   amount numeric(14, 2) not null check (amount >= 0),
   party text not null,
@@ -53,9 +53,9 @@ create table if not exists public.payments (
 );
 
 create table if not exists public.documents (
-  id text primary key,
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  project_id text not null,
+  project_id uuid not null references public.projects(id) on delete cascade,
   name text not null,
   category text not null check (category in ('invoice', 'receipt', 'blueprint', 'estimate', 'contract', 'other')),
   size bigint not null default 0,

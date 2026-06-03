@@ -18,7 +18,8 @@ interface ProjectDetailProps {
   onDeletePayment: (paymentId: string) => void;
   onEditPayment?: (payment: Payment) => void;
   onAddContact: (name: string, role: ContactRole, phone: string, email: string, company: string) => void;
-  onAddContacts?: (contacts: Array<{ name: string; role: ContactRole; phone: string; email: string; company: string }>) => void;
+  onAddContacts?: (contacts: Array<{ name: string; role: ContactRole; phone: string; email: string; company: string }>) => Promise<boolean> | boolean | void;
+  onUpdateContact?: (contactId: string, contact: { name: string; role: ContactRole; phone: string; email: string; company: string; gstNumber?: string; address?: string }) => Promise<boolean> | boolean | void;
   onUpdateContactRole?: (contactId: string, role: ContactRole) => void;
   onAddDocument: (file: File, category: DocumentCategory) => void;
   onDeleteDocument: (docId: string) => void;
@@ -37,6 +38,7 @@ export default function ProjectDetail({
   onEditPayment,
   onAddContact,
   onAddContacts,
+  onUpdateContact,
   onUpdateContactRole,
   onAddDocument,
   onDeleteDocument,
@@ -781,6 +783,7 @@ export default function ProjectDetail({
             contacts={contacts}
             onAddContact={onAddContact}
             onAddContacts={onAddContacts}
+            onUpdateContact={onUpdateContact}
             onUpdateContactRole={onUpdateContactRole}
             payments={payments}
             projects={projects}
