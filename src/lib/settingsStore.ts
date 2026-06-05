@@ -2,29 +2,21 @@ type StaffSalary = { id: string; name: string; role: string; salary: number };
 type Overhead = { id: string; label: string; amount: number };
 
 export const DEFAULT_COMPANY_SETTINGS = {
-  companyName: 'Catalyser Design',
-  address: 'Unit number 809, 99 Avenue, Lullanagar, Pune - 411040',
-  gstNumber: '27AAECC4524C1Z9',
-  email: 'contact@catalyserdesign.com',
-  phone: '+91 98765 43210',
-  bankAccountName: 'Catalyser Design',
-  bankName: 'HDFC Bank Ltd',
-  bankAccountNumber: '50200012345678',
-  bankAccountType: 'Current',
-  bankIfscCode: 'HDFC0001234',
+  companyName: '',
+  address: '',
+  gstNumber: '',
+  email: '',
+  phone: '',
+  bankAccountName: '',
+  bankName: '',
+  bankAccountNumber: '',
+  bankAccountType: '',
+  bankIfscCode: '',
 };
 
-export const DEFAULT_STAFF_SALARIES: StaffSalary[] = [
-  { id: 'st-1', name: 'Ar. Rohit Sharma', role: 'Senior Landscape Architect', salary: 55000 },
-  { id: 'st-2', name: 'Ananya Mehta', role: 'Interior & Space Designer', salary: 38000 },
-  { id: 'st-3', name: 'Kabir Verma', role: '3D Visualiser & Renderer', salary: 28000 },
-];
+export const DEFAULT_STAFF_SALARIES: StaffSalary[] = [];
 
-export const DEFAULT_CUSTOM_OVERHEADS: Overhead[] = [
-  { id: 'oh-1', label: 'Pro Design Softwares (AutoCAD, Revit, SketchUp)', amount: 15400 },
-  { id: 'oh-2', label: 'Studio Base Rent & Electric Utilities', amount: 35000 },
-  { id: 'oh-3', label: 'Admin Staff & Site Logistics Reimbursement', amount: 8000 },
-];
+export const DEFAULT_CUSTOM_OVERHEADS: Overhead[] = [];
 
 const settingsMemory = new Map<string, string>();
 

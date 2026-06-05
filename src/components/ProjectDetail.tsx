@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { Project, Payment, Contact, CloudDocument, PaymentType, PaymentMode, DocumentCategory, ContactRole, PartyRole } from '../types';
-import { formatDate } from '../lib/formatter';
+import { formatCurrency, formatDate } from '../lib/formatter';
+import { createWorkspaceFileUrl, validateBillImageFile } from '../lib/fileStorage';
+import { readContactImportFile } from '../lib/contactImport';
 import { PARTY_ROLE_OPTIONS, PAYABLE_CONTACT_ROLES } from '../lib/roleLabels';
 import InvoiceGenerator from './InvoiceGenerator';
 import DocumentManager from './DocumentManager';
 import ContactManager from './ContactManager';
-import { ChevronLeft, Landmark, IndianRupee, ArrowUpRight, ArrowDownLeft, Calendar, FileCheck, Users, HelpCircle, HardHat, Receipt, HelpCircle as Help, Camera, Edit, Trash2 } from 'lucide-react';
+import { ChevronLeft, Landmark, IndianRupee, ArrowUpRight, ArrowDownLeft, Calendar, FileCheck, Users, HelpCircle, HardHat, Receipt, HelpCircle as Help, Camera, Edit, Trash2, Upload } from 'lucide-react';
 
 interface ProjectDetailProps {
   project: Project;
@@ -17,14 +19,22 @@ interface ProjectDetailProps {
   onAddPayment: (payment: Omit<Payment, 'id'>) => void;
   onDeletePayment: (paymentId: string) => void;
   onEditPayment?: (payment: Payment) => void;
-  onAddContact: (name: string, role: ContactRole, phone: string, email: string, company: string) => void;
-  onAddContacts?: (contacts: Array<{ name: string; role: ContactRole; phone: string; email: string; company: string }>) => Promise<boolean> | boolean | void;
+  onAddContact: (name: string, role: ContactRole, phone: string, email: string, company: string, gstNumber?: string, address?: string) => void;
+  onAddContacts?: (contacts: Array<{ name: string; role: ContactRole; phone: string; email: string; company: string; gstNumber?: string; address?: string }>) => Promise<boolean> | boolean | void;
   onUpdateContact?: (contactId: string, contact: { name: string; role: ContactRole; phone: string; email: string; company: string; gstNumber?: string; address?: string }) => Promise<boolean> | boolean | void;
   onUpdateContactRole?: (contactId: string, role: ContactRole) => void;
   onAddDocument: (file: File, category: DocumentCategory) => void;
   onDeleteDocument: (docId: string) => void;
   onDownloadDocument: (doc: CloudDocument) => void;
 }
+
+const getTodayDateInputValue = () => {
+  const now = new Date();
+  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return localDate.toISOString().substring(0, 10);
+};
+
+const DEFAULT_TRANSACTION_REMARK = 'No remark provided';
 
 export default function ProjectDetail({
   project,
@@ -48,18 +58,27 @@ export default function ProjectDetail({
   
   // States for Adding dynamic transaction ledger record
   const [showAddPayment, setShowAddPayment] = useState(false);
-  const [payType, setPayType] = useState<PaymentType>('out'); // Default 'out' as requested for tracking expenses!
+  const [payType, setPayType] = useState<PaymentType>('out');
   const [amount, setAmount] = useState('');
   const [partyInput, setPartyInput] = useState('');
   const [partySearchStr, setPartySearchStr] = useState('');
+  const [newPartyRole, setNewPartyRole] = useState<ContactRole>('vendor');
+  const [newPartyPhone, setNewPartyPhone] = useState('');
+  const [newPartyEmail, setNewPartyEmail] = useState('');
+  const [newPartyCompany, setNewPartyCompany] = useState('');
+  const [newPartyGstNumber, setNewPartyGstNumber] = useState('');
+  const [newPartyAddress, setNewPartyAddress] = useState('');
+  const [partyImportStatus, setPartyImportStatus] = useState('');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('bank_transfer');
   const [remark, setRemark] = useState('');
   const [billPhoto, setBillPhoto] = useState<string>('');
+  const [paymentDate, setPaymentDate] = useState(getTodayDateInputValue());
   
   // Select among existing contacts easily
   const [selectedContact, setSelectedContact] = useState<string>('');
   const [selectedPartyLedger, setSelectedPartyLedger] = useState<string | null>(null);
   const [viewingBillPhoto, setViewingBillPhoto] = useState<string | null>(null);
+  const [billPhotoError, setBillPhotoError] = useState('');
 
   // Edit payment modal state
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
@@ -72,13 +91,82 @@ export default function ProjectDetail({
   const [editType, setEditType] = useState<PaymentType>('out');
   const [editBillPhoto, setEditBillPhoto] = useState<string>('');
 
+  const readBillPhotoFile = (file: File, onRead: (dataUrl: string) => void) => {
+    const error = validateBillImageFile(file);
+    if (error) {
+      setBillPhotoError(error);
+      return;
+    }
+
+    setBillPhotoError('');
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      onRead(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleViewBillPhoto = (payment: Payment) => {
+    void (async () => {
+      if (payment.billPhoto) {
+        setViewingBillPhoto(payment.billPhoto);
+        return;
+      }
+      if (payment.billPhotoStoragePath) {
+        const signedUrl = await createWorkspaceFileUrl(payment.billPhotoStoragePath);
+        if (signedUrl) {
+          setViewingBillPhoto(signedUrl);
+          return;
+        }
+      }
+      setBillPhotoError('Bill attachment is not available.');
+    })();
+  };
+
+  const resetNewPartyFields = (roleOverride?: ContactRole) => {
+    setNewPartyRole(roleOverride || (payType === 'in' ? 'client' : 'vendor'));
+    setNewPartyPhone('');
+    setNewPartyEmail('');
+    setNewPartyCompany('');
+    setNewPartyGstNumber('');
+    setNewPartyAddress('');
+    setPartyImportStatus('');
+  };
+
+  const handleImportPartyFromFile = async (file: File | undefined) => {
+    if (!file) return;
+    setPartyImportStatus('Reading contact file...');
+
+    try {
+      const importedContacts = await readContactImportFile(file, payType === 'in' ? 'client' : 'vendor');
+      const importedContact = importedContacts[0];
+
+      if (!importedContact) {
+        setPartyImportStatus('No contact found in this file.');
+        return;
+      }
+
+      setSelectedContact('custom');
+      setPartyInput(importedContact.name);
+      setNewPartyRole(importedContact.role);
+      setNewPartyPhone(importedContact.phone);
+      setNewPartyEmail(importedContact.email);
+      setNewPartyCompany(importedContact.company);
+      setNewPartyGstNumber(importedContact.gstNumber || '');
+      setNewPartyAddress(importedContact.address || '');
+      setPartyImportStatus(importedContacts.length > 1 ? 'Imported first contact from file.' : 'Imported contact from file.');
+    } catch {
+      setPartyImportStatus('Unable to import this file. Use a Google Contacts CSV export or .vcf file.');
+    }
+  };
+
   const handleBeginEdit = (p: Payment) => {
     setEditingPayment(p);
     setEditAmount(p.amount.toString());
     setEditParty(p.party);
     setEditPartyRole(p.partyRole);
     setEditPaymentMode(p.paymentMode);
-    setEditRemark(p.remark);
+    setEditRemark(p.remark.trim() || DEFAULT_TRANSACTION_REMARK);
     setEditDate(p.date || new Date().toISOString().substring(0, 10));
     setEditType(p.type);
     setEditBillPhoto(p.billPhoto || '');
@@ -97,9 +185,10 @@ export default function ProjectDetail({
         party: editParty.trim(),
         partyRole: editPartyRole,
         paymentMode: editPaymentMode,
-        remark: editRemark.trim(),
+        remark: editRemark.trim() || DEFAULT_TRANSACTION_REMARK,
         date: editDate,
         billPhoto: editBillPhoto || undefined,
+        billPhotoStoragePath: editBillPhoto?.startsWith('data:') ? undefined : editingPayment.billPhotoStoragePath,
       });
     }
     setEditingPayment(null);
@@ -122,7 +211,7 @@ export default function ProjectDetail({
   // Handles adding new payment details
   const handlePaymentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amount || Number(amount) <= 0) return;
+    if (!amount || Number(amount) <= 0 || !paymentDate) return;
 
     // Party selection resolution (use picked contact or typed string)
     let finalParty = partyInput.trim();
@@ -146,8 +235,21 @@ export default function ProjectDetail({
       finalParty = payType === 'in' ? 'Client' : 'Payee';
     }
 
-    // Automatically retrieves the current device date!
-    const currentDateStr = new Date().toISOString().substring(0, 10); // Format YYYY-MM-DD local
+    if (selectedContact === 'custom' && finalParty) {
+      const existingContact = contacts.find((c) => c.name.trim().toLowerCase() === finalParty.toLowerCase());
+      derivedRole = newPartyRole;
+      if (!existingContact) {
+        onAddContact(
+          finalParty,
+          newPartyRole,
+          newPartyPhone.trim(),
+          newPartyEmail.trim(),
+          newPartyCompany.trim(),
+          newPartyGstNumber.trim() || undefined,
+          newPartyAddress.trim() || undefined,
+        );
+      }
+    }
 
     onAddPayment({
       projectId: project.id,
@@ -157,7 +259,7 @@ export default function ProjectDetail({
       partyRole: derivedRole,
       paymentMode,
       remark,
-      date: currentDateStr, // Taken automatically
+      date: paymentDate,
       billPhoto: billPhoto || undefined,
     });
 
@@ -165,8 +267,10 @@ export default function ProjectDetail({
     setAmount('');
     setPartyInput('');
     setSelectedContact('');
+    resetNewPartyFields();
     setRemark('');
     setBillPhoto('');
+    setPaymentDate(getTodayDateInputValue());
     setShowAddPayment(false);
   };
 
@@ -198,7 +302,7 @@ export default function ProjectDetail({
               ? 'bg-slate-100 text-slate-705 border-slate-205'
               : 'bg-blue-100 text-blue-700 border-blue-100'
           }`}>
-            {project.status === 'ongoing' ? '🟢 Ongoing' : project.status === 'completed' ? '✅ Completed' : '🟡 On Hold'}
+            {project.status === 'ongoing' ? 'Ongoing' : project.status === 'completed' ? 'Completed' : 'On Hold'}
           </span>
         </div>
       </div>
@@ -206,12 +310,12 @@ export default function ProjectDetail({
       {/* Project Financial Health Card */}
       <div className="bg-white rounded-2xl border border-slate-150 p-6 flex flex-col md:flex-row justify-between items-stretch gap-6 shadow-sm">
         <div className="space-y-2 text-left flex-1 md:border-r md:border-slate-100 md:pr-6">
-          <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Selected Portfolio</span>
+          <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Project</span>
           <h2 className="text-xl font-bold text-slate-800 leading-tight">{project.name}</h2>
           <p className="text-slate-500 text-xs leading-relaxed max-w-xl">{project.description}</p>
           <div className="text-xs text-slate-400 space-y-0.5 pt-1">
-            <span>• Job Site: <span className="font-semibold text-slate-650">{project.address || 'Address Unregistered'}</span></span>
-            <span className="block">• Primary Client Account: <span className="font-semibold text-slate-650">{project.clientName}</span></span>
+            <span>Site: <span className="font-semibold text-slate-650">{project.address || 'Address not set'}</span></span>
+            <span className="block">Client: <span className="font-semibold text-slate-650">{project.clientName}</span></span>
           </div>
         </div>
 
@@ -219,13 +323,13 @@ export default function ProjectDetail({
         <div className="grid grid-cols-2 gap-4 shrink-0 justify-between items-center sm:w-96">
           <div className="bg-blue-50 border border-blue-100 p-3.5 rounded-xl text-left">
             <span className="text-[9px] uppercase font-bold text-blue-600 block tracking-wider">Total Received (In)</span>
-            <span className="text-base font-black text-emerald-600 block mt-0.5">₹{totalInflow.toLocaleString()}</span>
+            <span className="text-base font-black text-emerald-600 block mt-0.5">{formatCurrency(totalInflow)}</span>
             <span className="text-[9px] text-slate-400 block font-medium">Milestones cleared</span>
           </div>
 
           <div className="bg-rose-50 border border-rose-100 p-3.5 rounded-xl text-left">
             <span className="text-[9px] uppercase font-bold text-rose-600 block tracking-wider">Total Expenses (Out)</span>
-            <span className="text-base font-black text-rose-600 block mt-0.5">₹{totalOutflow.toLocaleString()}</span>
+            <span className="text-base font-black text-rose-600 block mt-0.5">{formatCurrency(totalOutflow)}</span>
             <span className="text-[9px] text-slate-400 block font-medium">Utilization: {budgetUtilization.toFixed(0)}%</span>
           </div>
 
@@ -233,12 +337,12 @@ export default function ProjectDetail({
             <div>
               <span className="text-slate-400 block text-[10px]">Net Project Inflow Balance</span>
               <span className={`font-bold text-sm ${netBalance >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                ₹{netBalance.toLocaleString()}
+                {formatCurrency(netBalance)}
               </span>
             </div>
             <div className="text-right">
-              <span className="text-slate-450 block text-[10px]">Job Site Allocated Budget</span>
-              <span className="font-bold text-slate-700">₹{project.budget.toLocaleString()}</span>
+              <span className="text-slate-450 block text-[10px]">Budget</span>
+              <span className="font-bold text-slate-700">{formatCurrency(project.budget)}</span>
             </div>
           </div>
         </div>
@@ -248,11 +352,11 @@ export default function ProjectDetail({
       <div className="border-b border-slate-200">
         <nav className="flex gap-4">
           {[
-            { id: 'ledger', label: 'transaction', count: projectPayments.length },
-            { id: 'invoice', label: 'Billing Invoices', count: null },
+            { id: 'ledger', label: 'Ledger', count: projectPayments.length },
+            { id: 'invoice', label: 'Invoices', count: null },
             { id: 'parties', label: 'Parties', count: null },
             { id: 'documents', label: 'Documents', count: documents.filter((doc) => doc.projectId === project.id).length },
-            { id: 'contacts', label: 'Directory Contacts', count: null },
+            { id: 'contacts', label: 'Contacts', count: null },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -281,12 +385,15 @@ export default function ProjectDetail({
             {/* Quick Filter & Quick Add payment row */}
             <div className="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-100">
               <div>
-                <h3 className="font-bold text-slate-800 text-sm">Site Ledger Cash Book</h3>
-                <p className="text-[11px] text-slate-400">Register daily material expense receipts &amp; owner clearings</p>
+                <h3 className="font-bold text-slate-800 text-sm">Project Ledger</h3>
+                <p className="text-[11px] text-slate-400">Record receipts, expenses, and bill attachments.</p>
               </div>
 
               <button
-                onClick={() => setShowAddPayment(true)}
+                onClick={() => {
+                  setPaymentDate(getTodayDateInputValue());
+                  setShowAddPayment(true);
+                }}
                 className="bg-blue-600 hover:bg-blue-500 font-bold text-white text-xs px-3.5 py-2 rounded-lg flex items-center gap-1 cursor-pointer transition shadow-xs border-none"
                 id="add-transaction-ledger-btn"
               >
@@ -301,13 +408,13 @@ export default function ProjectDetail({
                   {/* Header */}
                   <div className="bg-slate-900 text-white px-5 py-3.5 flex justify-between items-center text-left">
                     <h3 className="font-bold text-sm tracking-tight flex items-center gap-1.5">
-                      <Landmark size={15} /> Save Daily Transaction Details
+                      <Landmark size={15} /> Add Transaction
                     </h3>
                     <button
                       onClick={() => setShowAddPayment(false)}
                       className="text-white/80 hover:text-white font-bold text-sm whitespace-nowrap cursor-pointer"
                     >
-                      ✕
+                      X
                     </button>
                   </div>
 
@@ -322,6 +429,7 @@ export default function ProjectDetail({
                           onClick={() => {
                             setPayType('in');
                             setSelectedContact('');
+                            resetNewPartyFields('client');
                           }}
                           className={`py-1.5 text-xs font-bold rounded-md transition cursor-pointer ${
                             payType === 'in'
@@ -329,13 +437,14 @@ export default function ProjectDetail({
                               : 'text-slate-500 hover:text-slate-700'
                           }`}
                         >
-                          💸 Cash received (IN)
+                          Cash received
                         </button>
                         <button
                           type="button"
                           onClick={() => {
                             setPayType('out');
                             setSelectedContact('');
+                            resetNewPartyFields('vendor');
                           }}
                           className={`py-1.5 text-xs font-bold rounded-md transition cursor-pointer ${
                             payType === 'out'
@@ -343,14 +452,14 @@ export default function ProjectDetail({
                               : 'text-slate-500 hover:text-slate-700'
                           }`}
                         >
-                          🧾 Expense paid (OUT)
+                          Expense paid
                         </button>
                       </div>
                     </div>
 
                     {/* Numeric amount */}
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Transfer Amount (₹) *</label>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Amount *</label>
                       <input
                         type="number"
                         required
@@ -377,32 +486,105 @@ export default function ProjectDetail({
                           setSelectedContact(e.target.value);
                           if (e.target.value === 'custom') {
                             setPartyInput('');
+                            resetNewPartyFields(payType === 'in' ? 'client' : 'vendor');
                           } else {
                             const cObj = contacts.find((c) => c.id === e.target.value);
                             setPartyInput(cObj ? cObj.name : '');
+                            resetNewPartyFields(payType === 'in' ? 'client' : 'vendor');
                           }
                         }}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs focus:outline-none"
                       >
-                        <option value="">-- Choose registered contact or custom --</option>
+                        <option value="">Choose registered contact or add new</option>
                         {suggestedContacts.map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.name} ({c.company || c.role})
                           </option>
                         ))}
-                        <option value="custom">✍️ Type Custom Name Manually...</option>
+                        <option value="custom">{payType === 'in' ? 'Add client' : 'Add vendor / supplier'}</option>
                       </select>
 
                       {/* Manual input if they chose custom */}
                       {(!selectedContact || selectedContact === 'custom') && (
-                        <input
-                          type="text"
-                          required
-                          placeholder={payType === 'in' ? "Owner Client's Name" : 'Material store, contractor, or site worker'}
-                          value={partyInput}
-                          onChange={(e) => setPartyInput(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-250 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 space-y-2">
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <input
+                              type="text"
+                              required
+                              placeholder={payType === 'in' ? 'Enter client name' : 'Enter vendor, supplier, contractor, or site worker'}
+                              value={partyInput}
+                              onChange={(e) => setPartyInput(e.target.value)}
+                              className="min-w-0 flex-1 bg-white border border-slate-250 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                            <label className="shrink-0 bg-white hover:bg-blue-50 text-blue-700 font-bold text-xs px-3 py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer border border-blue-100 whitespace-nowrap">
+                              <Upload size={13} /> Import
+                              <input
+                                type="file"
+                                accept=".csv,.vcf,text/csv,text/vcard"
+                                onChange={(event) => {
+                                  void handleImportPartyFromFile(event.target.files?.[0]);
+                                  event.target.value = '';
+                                }}
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
+                          {partyImportStatus && (
+                            <div className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">
+                              {partyImportStatus}
+                            </div>
+                          )}
+                          {selectedContact === 'custom' && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <select
+                                value={newPartyRole}
+                                onChange={(e) => setNewPartyRole(e.target.value as ContactRole)}
+                                className="w-full bg-white border border-slate-250 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              >
+                                {PARTY_ROLE_OPTIONS.map((option) => (
+                                  <option key={option.id} value={option.id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                type="text"
+                                placeholder="Phone"
+                                value={newPartyPhone}
+                                onChange={(e) => setNewPartyPhone(e.target.value)}
+                                className="w-full bg-white border border-slate-250 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
+                              <input
+                                type="email"
+                                placeholder="Email"
+                                value={newPartyEmail}
+                                onChange={(e) => setNewPartyEmail(e.target.value)}
+                                className="w-full bg-white border border-slate-250 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
+                              <input
+                                type="text"
+                                placeholder="Company"
+                                value={newPartyCompany}
+                                onChange={(e) => setNewPartyCompany(e.target.value)}
+                                className="w-full bg-white border border-slate-250 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
+                              <input
+                                type="text"
+                                placeholder="GSTIN"
+                                value={newPartyGstNumber}
+                                onChange={(e) => setNewPartyGstNumber(e.target.value)}
+                                className="w-full bg-white border border-slate-250 rounded-lg p-2 text-xs uppercase font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
+                              <input
+                                type="text"
+                                placeholder="Address"
+                                value={newPartyAddress}
+                                onChange={(e) => setNewPartyAddress(e.target.value)}
+                                className="w-full bg-white border border-slate-250 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -414,21 +596,28 @@ export default function ProjectDetail({
                         onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}
                         className="w-full bg-slate-50 border border-slate-250 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                       >
-                        <option value="bank_transfer">🏛️ Bank Transfer / ACH</option>
-                        <option value="cash">💵 Hard Cash</option>
-                        <option value="upi">📱 UPI / Mobile Payment Wallet</option>
-                        <option value="cheque">✍️ Bank Cheque Draw</option>
-                        <option value="card">💳 Company Debit/Credit Card</option>
+                        <option value="bank_transfer">Bank Transfer</option>
+                        <option value="cash">Cash</option>
+                        <option value="upi">UPI</option>
+                        <option value="cheque">Cheque</option>
+                        <option value="card">Card</option>
                       </select>
                     </div>
 
-                    {/* Auto date display */}
-                    <div className="bg-blue-50 border border-blue-100 p-2.5 rounded-xl flex items-center justify-between text-xs text-blue-900">
-                      <div className="flex items-center gap-1.5">
+                    {/* Transaction date */}
+                    <div className="bg-blue-50 border border-blue-100 p-2 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-blue-900">
+                      <label htmlFor="payment-date" className="flex items-center gap-1.5 font-semibold">
                         <Calendar size={13} />
-                        <span>Current System Auto-Date:</span>
-                      </div>
-                      <span className="font-mono font-bold tracking-wider">{new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        <span>Transaction Date</span>
+                      </label>
+                      <input
+                        id="payment-date"
+                        type="date"
+                        required
+                        value={paymentDate}
+                        onChange={(e) => setPaymentDate(e.target.value)}
+                        className="w-full sm:w-auto min-w-0 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 font-mono font-bold text-blue-950 outline-none focus:ring-1 focus:ring-blue-500"
+                      />
                     </div>
 
                      {/* Remark description details */}
@@ -455,11 +644,7 @@ export default function ProjectDetail({
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
-                              const reader = new FileReader();
-                              reader.onloadend = () => {
-                                setBillPhoto(reader.result as string);
-                              };
-                              reader.readAsDataURL(file);
+                              readBillPhotoFile(file, setBillPhoto);
                             }
                           }}
                           className="hidden"
@@ -491,6 +676,9 @@ export default function ProjectDetail({
                           <span className="text-[10px] text-slate-400 italic">No photo attached</span>
                         )}
                       </div>
+                      {billPhotoError && (
+                        <div className="text-[10px] font-bold text-rose-600">{billPhotoError}</div>
+                      )}
                     </div>
 
                     {/* Form actions */}
@@ -538,7 +726,7 @@ export default function ProjectDetail({
                   <table className="w-full divide-y divide-slate-150 border-collapse table-auto text-left">
                     <thead className="bg-slate-50 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                       <tr>
-                        <th className="px-4 py-2.5">Log Date</th>
+                        <th className="px-4 py-2.5">Date</th>
                         <th className="px-4 py-2.5">Transaction detail</th>
                         <th className="px-4 py-2.5">Party association</th>
                         <th className="px-4 py-2.5">Payment mode</th>
@@ -555,9 +743,9 @@ export default function ProjectDetail({
                           </td>
                           <td className="px-4 py-3 text-left">
                             <div className="flex items-center gap-2">
-                              {p.billPhoto && (
+                              {(p.billPhoto || p.billPhotoStoragePath) && (
                                 <button
-                                  onClick={() => setViewingBillPhoto(p.billPhoto!)}
+                                  onClick={() => handleViewBillPhoto(p)}
                                   className="shrink-0 p-1 bg-blue-50 rounded-md border border-blue-200 hover:bg-blue-100 transition duration-150 cursor-pointer flex items-center justify-center shadow-xs"
                                   title="View Attached Bill Photo"
                                 >
@@ -579,10 +767,10 @@ export default function ProjectDetail({
                             {p.paymentMode.replace('_', ' ')}
                           </td>
                           <td className="px-4 py-3 text-right font-bold text-rose-500 whitespace-nowrap">
-                            {p.type === 'out' ? `-₹${p.amount.toLocaleString()}` : '—'}
+                            {p.type === 'out' ? `-${formatCurrency(p.amount)}` : '-'}
                           </td>
                           <td className="px-4 py-3 text-right font-bold text-emerald-600 whitespace-nowrap">
-                            {p.type === 'in' ? `+₹${p.amount.toLocaleString()}` : '—'}
+                            {p.type === 'in' ? `+${formatCurrency(p.amount)}` : '-'}
                           </td>
                           <td className="px-4 py-3 text-center">
                             <button
@@ -618,8 +806,8 @@ export default function ProjectDetail({
           <div className="space-y-4 text-left font-sans" id="party-ledger-tab">
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-150 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <div>
-                <h4 className="text-sm font-bold text-slate-800">Party-wise Account Ledger</h4>
-                <p className="text-xs text-slate-500">Track and view transactions grouped by specific client, contractor, vendor, or supplier account portfolios under this project.</p>
+                <h4 className="text-sm font-bold text-slate-800">Party Ledgers</h4>
+                <p className="text-xs text-slate-500">Review transactions grouped by client, vendor, supplier, contractor, or site worker.</p>
               </div>
             </div>
 
@@ -630,9 +818,9 @@ export default function ProjectDetail({
                 return (
                   <div className="bg-white rounded-2xl border border-slate-150 p-12 text-center">
                     <Users className="text-slate-350 mx-auto mb-2.5" size={36} />
-                    <h4 className="font-bold text-slate-700 text-sm">No Active Party Accounts for this Portfolio</h4>
+                    <h4 className="font-bold text-slate-700 text-sm">No party ledger yet</h4>
                     <p className="text-xs text-slate-400 mt-1">
-                      Create financial transactions in the cash book to establish and track relative balances.
+                      Add ledger transactions to track party balances.
                     </p>
                   </div>
                 );
@@ -640,7 +828,7 @@ export default function ProjectDetail({
 
               return (
                 <div className="max-w-3xl space-y-4">
-                  <span className="text-[10px] font-mono font-bold tracking-wider text-slate-400 uppercase block">Associate Accounts ({partyNames.length})</span>
+                  <span className="text-[10px] font-mono font-bold tracking-wider text-slate-400 uppercase block">Party Accounts ({partyNames.length})</span>
                   <div className="space-y-3">
                     {partyNames.map((pName) => {
                       const directTxns = projectPayments.filter((p) => p.party.toLowerCase() === pName.toLowerCase());
@@ -681,11 +869,11 @@ export default function ProjectDetail({
                             <div className="grid grid-cols-2 gap-2 mt-3 pt-2.5 border-t border-slate-100 text-[10px]">
                               <div>
                                 <span className="text-slate-400 block uppercase font-medium">Spent (Out)</span>
-                                <span className="font-bold text-rose-500">₹{dOut.toLocaleString()}</span>
+                                <span className="font-bold text-rose-500">{formatCurrency(dOut)}</span>
                               </div>
                               <div>
                                 <span className="text-slate-400 block uppercase font-medium">Deposited (In)</span>
-                                <span className="font-bold text-emerald-600 font-sans">₹{dIn.toLocaleString()}</span>
+                                <span className="font-bold text-emerald-600 font-sans">{formatCurrency(dIn)}</span>
                               </div>
                             </div>
                           </div>
@@ -700,9 +888,9 @@ export default function ProjectDetail({
                                   <span className="text-[11px] text-slate-505 font-semibold">All registered cash logs for <strong className="text-slate-850">{pName}</strong></span>
                                 </div>
                                 <div className="text-right">
-                                  <span className="text-slate-400 uppercase tracking-widest text-[9px] font-bold block">Portfolio Net Balance</span>
+                                  <span className="text-slate-400 uppercase tracking-widest text-[9px] font-bold block">Net Balance</span>
                                   <span className={`text-xs font-black block ${partyNetBalance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                    {partyNetBalance >= 0 ? '+' : ''}₹{partyNetBalance.toLocaleString()}
+                                    {partyNetBalance >= 0 ? '+' : ''}{formatCurrency(partyNetBalance)}
                                   </span>
                                 </div>
                               </div>
@@ -721,11 +909,11 @@ export default function ProjectDetail({
                                         <div className="text-left">
                                           <div className="flex items-center gap-2">
                                             <span className="text-xs font-semibold text-slate-800 block truncate max-w-[150px] sm:max-w-md">{p.remark || 'N/A'}</span>
-                                            {p.billPhoto && (
+                                            {(p.billPhoto || p.billPhotoStoragePath) && (
                                               <button
                                                 onClick={(e) => {
                                                   e.stopPropagation();
-                                                  setViewingBillPhoto(p.billPhoto!);
+                                                  handleViewBillPhoto(p);
                                                 }}
                                                 className="p-1 bg-slate-50 rounded border border-slate-200 hover:bg-blue-50 cursor-pointer transition flex items-center shadow-2xs"
                                                 title="View Attached Bill Photo"
@@ -736,7 +924,7 @@ export default function ProjectDetail({
                                           </div>
                                           <div className="flex flex-wrap items-center gap-1.5 mt-0.5 text-[9px] text-slate-450 font-bold font-mono">
                                             <span>{formatDate(p.date)}</span>
-                                            <span>•</span>
+                                            <span>/</span>
                                             <span className="capitalize">{p.paymentMode.replace('_', ' ')}</span>
                                           </div>
                                         </div>
@@ -745,7 +933,7 @@ export default function ProjectDetail({
                                       <div className="flex items-center gap-2.5 shrink-0">
                                         <div className="text-right whitespace-nowrap">
                                           <span className={`text-xs font-black whitespace-nowrap block ${p.type === 'in' ? 'text-emerald-600' : 'text-rose-500'}`}>
-                                            {p.type === 'in' ? '+' : '-'}₹{p.amount.toLocaleString()}
+                                            {p.type === 'in' ? '+' : '-'}{formatCurrency(p.amount)}
                                           </span>
                                         </div>
                                         <button
@@ -857,13 +1045,13 @@ export default function ProjectDetail({
           >
             <div className="flex justify-between items-center pb-2 border-b border-slate-150">
               <span className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5 uppercase tracking-wide">
-                <Edit size={16} className="text-blue-600" /> Correct Transaction Log
+                <Edit size={16} className="text-blue-600" /> Edit Transaction
               </span>
               <button
                 onClick={() => setEditingPayment(null)}
                 className="text-slate-400 hover:text-slate-650 font-bold text-sm cursor-pointer border-none bg-transparent"
               >
-                ✕
+                X
               </button>
             </div>
 
@@ -879,7 +1067,7 @@ export default function ProjectDetail({
                       : 'text-slate-500 hover:bg-slate-100'
                   }`}
                 >
-                  📉 Outflow (Expense Debit)
+                  Outflow
                 </button>
                 <button
                   type="button"
@@ -890,7 +1078,7 @@ export default function ProjectDetail({
                       : 'text-slate-500 hover:bg-slate-100'
                   }`}
                 >
-                  📈 Inflow (Deposit Credit)
+                  Inflow
                 </button>
               </div>
 
@@ -907,11 +1095,11 @@ export default function ProjectDetail({
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">Amount (₹)</label>
+                  <label className="text-[10px] uppercase font-bold text-slate-400">Amount</label>
                   <input
                     type="number"
                     required
-                    placeholder="Enter amount (₹)"
+                    placeholder="Enter amount"
                     value={editAmount}
                     onChange={(e) => setEditAmount(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 outline-none font-medium text-slate-800"
@@ -922,7 +1110,7 @@ export default function ProjectDetail({
               {/* Party association details */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">Party / Beneficiary</label>
+                  <label className="text-[10px] uppercase font-bold text-slate-400">Party</label>
                   <input
                     type="text"
                     required
@@ -932,7 +1120,7 @@ export default function ProjectDetail({
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">Party Portfolio Role</label>
+                  <label className="text-[10px] uppercase font-bold text-slate-400">Role</label>
                   <select
                     value={editPartyRole}
                     onChange={(e) => setEditPartyRole(e.target.value as PartyRole)}
@@ -949,17 +1137,17 @@ export default function ProjectDetail({
 
               {/* Payment Mode */}
               <div className="space-y-1">
-                <label className="text-[10px] uppercase font-bold text-slate-400 font-mono">Payment Mode Selection</label>
+                <label className="text-[10px] uppercase font-bold text-slate-400 font-mono">Payment Mode</label>
                 <select
                   value={editPaymentMode}
                   onChange={(e) => setEditPaymentMode(e.target.value as any)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 outline-none font-medium text-slate-800"
                 >
-                  <option value="bank_transfer">🏛️ Bank Nettransfer / ACH Direct</option>
-                  <option value="cash">💵 Hard Coin / Cash Reserves</option>
-                  <option value="upi">📱 UPI Wallet / GPay / PhonePe</option>
-                  <option value="cheque">✍️ Physical Drawer Cheque</option>
-                  <option value="card">💳 Company Debit/Credit Card</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="cash">Cash</option>
+                  <option value="upi">UPI</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="card">Card</option>
                 </select>
               </div>
 
@@ -972,11 +1160,16 @@ export default function ProjectDetail({
                   placeholder="e.g. Purchased plumbing copper valves"
                   value={editRemark}
                   onChange={(e) => setEditRemark(e.target.value)}
+                  onBlur={() => {
+                    if (!editRemark.trim()) {
+                      setEditRemark(DEFAULT_TRANSACTION_REMARK);
+                    }
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 outline-none font-medium text-slate-800"
                 />
               </div>
 
-              {/* Footer Buttons with prominent Delete Action! */}
+              {/* Actions */}
               <div className="flex justify-between items-center pt-3 border-t border-slate-100 gap-3">
                 <button
                   type="button"

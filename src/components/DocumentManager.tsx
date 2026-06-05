@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { CloudDocument, DocumentCategory } from '../types';
 import { formatDate } from '../lib/formatter';
+import { validateWorkspaceDocumentFile } from '../lib/fileStorage';
 import { UploadCloud, File, FileText, Check, AlertCircle, RefreshCcw, Download, Trash2, Tag, Search, CornerDownRight } from 'lucide-react';
 
 interface DocumentManagerProps {
@@ -22,6 +23,7 @@ export default function DocumentManager({
   const [dragOver, setDragOver] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [uploadError, setUploadError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Filter project documents
@@ -61,6 +63,12 @@ export default function DocumentManager({
   };
 
   const uploadFile = (file: File) => {
+    const error = validateWorkspaceDocumentFile(file);
+    if (error) {
+      setUploadError(error);
+      return;
+    }
+    setUploadError('');
     onAddDocument(file, selectedCategory);
   };
 
@@ -142,8 +150,11 @@ export default function DocumentManager({
                 {dragOver ? 'Drop file here to upload' : 'Upload job site document'}
               </span>
               <span className="text-[10px] text-slate-400 block mt-0.5">
-                Drag &amp; drop, or tap to choose file (PDF, CAD, Excel up to 10MB)
+                Drag &amp; drop, or tap to choose file (PDF, image, spreadsheet, Word up to 10MB)
               </span>
+              {uploadError && (
+                <span className="mt-1 block text-[10px] font-bold text-rose-600">{uploadError}</span>
+              )}
             </div>
             <span className="text-[10px] mt-1 bg-slate-900 text-white px-2.5 py-0.5 rounded-full font-bold">
               Target Cat: {selectedCategory}

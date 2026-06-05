@@ -55,7 +55,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-400 text-xs font-mono tracking-widest">
-        CHECKING SECURE SESSION...
+        Checking session...
       </div>
     );
   }
@@ -127,9 +127,9 @@ export default function AuthGate({ children }: AuthGateProps) {
             <LockKeyhole size={20} />
           </div>
           <div>
-            <h1 className="text-xl font-black text-slate-900">Catalyser Cloud Login</h1>
+            <h1 className="text-xl font-black text-slate-900">Sign in to Catalyser</h1>
             <p className="text-xs text-slate-500 mt-1">
-              Sign in to sync projects, ledgers, contacts, and documents with Supabase.
+              Sync projects, ledgers, contacts, and documents across devices.
             </p>
           </div>
         </div>

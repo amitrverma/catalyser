@@ -34,6 +34,8 @@ const SETTINGS_KEYS = [
 const STAFF_SALARIES_KEY = 'cc_staff_salaries';
 const SYNCABLE_KEYS = new Set([...SETTINGS_KEYS, STAFF_SALARIES_KEY]);
 const STORAGE_BUCKET = 'catalyser-documents';
+const MAX_SETTINGS_ASSET_BYTES = 2 * 1024 * 1024;
+const SUPPORTED_SETTINGS_ASSET_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']);
 const ASSET_KEYS = [
   { dataKey: 'custom_logo_base64', pathKey: 'custom_logo_storage_path' },
   { dataKey: 'custom_stamp_base64', pathKey: 'custom_stamp_storage_path' },
@@ -73,11 +75,20 @@ async function uploadDataUrlAsset(userId: string, key: string, dataUrl: string) 
 
   const response = await fetch(dataUrl);
   const blob = await response.blob();
+  const contentType = blob.type || 'image/png';
+
+  if (!SUPPORTED_SETTINGS_ASSET_TYPES.has(contentType)) {
+    throw new Error('Use JPEG, PNG, WebP, or SVG image assets.');
+  }
+  if (blob.size > MAX_SETTINGS_ASSET_BYTES) {
+    throw new Error('Invoice image assets must be 2 MB or smaller.');
+  }
+
   const extension = extensionForContentType(blob.type || 'image/png');
   const path = `${userId}/settings/${key}.${extension}`;
   const uploadResult = await supabase.storage.from(STORAGE_BUCKET).upload(path, blob, {
     upsert: true,
-    contentType: blob.type || 'image/png',
+    contentType,
   });
 
   if (uploadResult.error) {
@@ -114,6 +125,9 @@ async function hydrateAssetUrls(settings: Record<string, unknown>) {
 }
 
 async function migrateLocalAssetsToStorage(userId: string, settings: Record<string, string | null>) {
+  let migrated = false;
+  let allAssetsSynced = true;
+
   for (const asset of ASSET_KEYS) {
     const value = settings[asset.dataKey];
     if (!value?.startsWith('data:')) continue;
@@ -129,10 +143,20 @@ async function migrateLocalAssetsToStorage(userId: string, settings: Record<stri
       if (signedUrl) {
         setSetting(asset.dataKey, signedUrl);
       }
+      migrated = true;
     } catch (error) {
+      allAssetsSynced = false;
       console.error('Supabase asset upload failed:', error);
     }
   }
+
+  if (migrated && typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('custom-logo-updated'));
+    window.dispatchEvent(new Event('custom-stamp-updated'));
+    window.dispatchEvent(new Event('custom-sign-updated'));
+  }
+
+  return allAssetsSynced;
 }
 
 export async function hydrateSettingsFromSupabase() {
@@ -177,46 +201,54 @@ export async function hydrateSettingsFromSupabase() {
   window.dispatchEvent(new Event('custom-settings-updated'));
 }
 
-export async function persistSettingsToSupabase() {
-  if (!canSync() || !supabase) return;
+export async function persistSettingsToSupabase(): Promise<boolean> {
+  if (!canSync() || !supabase) return true;
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-  if (!user) return;
-  const activeOrg = await ensureActiveOrganization();
-  const orgId = activeOrg?.id || null;
+    if (!user) return true;
+    const activeOrg = await ensureActiveOrganization();
+    const orgId = activeOrg?.id || null;
 
-  const settings = snapshotSettings(SETTINGS_KEYS);
-  await migrateLocalAssetsToStorage(user.id, settings);
+    const settings = snapshotSettings(SETTINGS_KEYS);
+    const assetsSynced = await migrateLocalAssetsToStorage(user.id, settings);
+    if (!assetsSynced) return false;
 
-  const salaries = readJsonValue(STAFF_SALARIES_KEY, []);
+    const salaries = readJsonValue(STAFF_SALARIES_KEY, []);
 
-  const [settingsResult, salariesResult] = await Promise.all([
-    supabase.from('company_settings').upsert(
-      {
-        user_id: user.id,
-        org_id: orgId,
-        settings,
-      },
-      { onConflict: 'user_id,org_id' },
-    ),
-    supabase.from('staff_salaries').upsert(
-      {
-        user_id: user.id,
-        org_id: orgId,
-        salaries,
-      },
-      { onConflict: 'user_id,org_id' },
-    ),
-  ]);
+    const [settingsResult, salariesResult] = await Promise.all([
+      supabase.from('company_settings').upsert(
+        {
+          user_id: user.id,
+          org_id: orgId,
+          settings,
+        },
+        { onConflict: 'user_id,org_id' },
+      ),
+      supabase.from('staff_salaries').upsert(
+        {
+          user_id: user.id,
+          org_id: orgId,
+          salaries,
+        },
+        { onConflict: 'user_id,org_id' },
+      ),
+    ]);
 
-  if (settingsResult.error) {
-    console.error('Supabase settings save failed:', settingsResult.error);
-  }
-  if (salariesResult.error) {
-    console.error('Supabase staff save failed:', salariesResult.error);
+    if (settingsResult.error) {
+      console.error('Supabase settings save failed:', settingsResult.error);
+    }
+    if (salariesResult.error) {
+      console.error('Supabase staff save failed:', salariesResult.error);
+    }
+
+    return !settingsResult.error && !salariesResult.error;
+  } catch (error) {
+    console.error('Supabase settings save failed:', error);
+    return false;
   }
 }
 

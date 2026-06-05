@@ -16,8 +16,13 @@ export default function Logo({
   onDark = false,
   allowChange = true,
 }: LogoProps) {
-  // Store custom logo in the app settings cache; Supabase sync persists it.
+  // Store custom logo in the app settings cache; Supabase sync uploads it.
   const [customLogo, setCustomLogo] = useState<string | null>(null);
+
+  const validateLogoAsset = (file: File) => {
+    const supportedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']);
+    return supportedTypes.has(file.type) && file.size <= 2 * 1024 * 1024;
+  };
 
   useEffect(() => {
     // Read on initial load
@@ -40,10 +45,15 @@ export default function Logo({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (!validateLogoAsset(file)) {
+        e.target.value = '';
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64String = reader.result as string;
         setSetting('custom_logo_base64', base64String);
+        removeSetting('custom_logo_storage_path');
         window.dispatchEvent(new Event('custom-logo-updated'));
         window.dispatchEvent(new Event('custom-settings-updated'));
       };
@@ -54,6 +64,7 @@ export default function Logo({
   const handleResetLogo = (e: React.MouseEvent) => {
     e.stopPropagation();
     removeSetting('custom_logo_base64');
+    removeSetting('custom_logo_storage_path');
     window.dispatchEvent(new Event('custom-logo-updated'));
     window.dispatchEvent(new Event('custom-settings-updated'));
   };

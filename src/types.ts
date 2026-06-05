@@ -24,7 +24,7 @@ export interface Payment {
   paymentMode: PaymentMode;
   remark: string;
   date: string; // ISO format or YYYY-MM-DD
-  billPhoto?: string; // Base64 data-url or static placeholder path
+  billPhoto?: string; // Local data URL before the file is uploaded.
   billPhotoStoragePath?: string;
 }
 
@@ -53,7 +53,7 @@ export interface CloudDocument {
   uploadedAt: string;
   syncStatus: 'synced' | 'syncing' | 'failed';
   fileType: string; // e.g. "application/pdf"
-  dataUrl?: string; // local preview base64 or mock content
+  dataUrl?: string; // Local preview data URL before the file is uploaded.
   storagePath?: string;
 }
 

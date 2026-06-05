@@ -8,25 +8,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Project, Payment, Contact, CloudDocument, ProjectStatus, PaymentType, DocumentCategory, DbData, ContactRole } from './types';
-import { getDbData, saveDbData } from './lib/db';
+import {
+  cacheDbData,
+  deleteContact,
+  deleteDocument,
+  deletePayment,
+  loadDbData,
+  persistContact,
+  persistDocument,
+  persistPayment,
+  persistProject,
+  saveDbData,
+} from './lib/db';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { hydrateSettingsFromSupabase, installSettingsPersistence, persistSettingsToSupabase } from './lib/settingsSync';
-import { createWorkspaceFileUrl, uploadWorkspaceFile } from './lib/fileStorage';
-import { ensureActiveOrganization } from './lib/orgs';
+import { createWorkspaceFileUrl, uploadPaymentBillDataUrl, uploadWorkspaceFile, validateWorkspaceDocumentFile } from './lib/fileStorage';
+import { ensureActiveOrganization, type ActiveOrganization } from './lib/orgs';
 import Logo from './components/Logo';
-import Dashboard from './components/Dashboard';
-import ProjectList from './components/ProjectList';
-import ProjectDetail from './components/ProjectDetail';
-import ContactManager from './components/ContactManager';
-import ReportGenerator from './components/ReportGenerator';
-import PartyLedgerStandalone from './components/PartyLedgerStandalone';
-import SettingsManager from './components/SettingsManager';
 import {
   LayoutDashboard,
   FolderKanban,
   Users,
+  AlertCircle,
   ShieldAlert,
   FileSpreadsheet,
   Settings,
@@ -35,6 +40,14 @@ import {
   UserCircle,
   Building2,
 } from 'lucide-react';
+
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const ProjectList = lazy(() => import('./components/ProjectList'));
+const ProjectDetail = lazy(() => import('./components/ProjectDetail'));
+const ContactManager = lazy(() => import('./components/ContactManager'));
+const ReportGenerator = lazy(() => import('./components/ReportGenerator'));
+const PartyLedgerStandalone = lazy(() => import('./components/PartyLedgerStandalone'));
+const SettingsManager = lazy(() => import('./components/SettingsManager'));
 
 type HomeTab = 'dashboard' | 'projects' | 'contacts' | 'reports' | 'settings';
 
@@ -59,9 +72,22 @@ function createRecordId() {
   return crypto.randomUUID();
 }
 
+function ScreenFallback() {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-xs font-bold uppercase tracking-widest text-slate-400 shadow-xs">
+      Loading workspace view...
+    </div>
+  );
+}
+
 export default function App() {
   const [db, setDb] = useState<DbData | null>(null);
+  const [dbLoadWarning, setDbLoadWarning] = useState<string | null>(null);
+  const [appNotice, setAppNotice] = useState<{ title: string; message: string } | null>(null);
+  const [activeWorkspace, setActiveWorkspace] = useState<ActiveOrganization | null>(null);
+  const [accountLabel, setAccountLabel] = useState(isSupabaseConfigured ? 'Cloud account' : 'Local workspace');
   const pendingSaveRef = useRef<Promise<boolean>>(Promise.resolve(true));
+  const pendingSettingsSaveRef = useRef<Promise<boolean>>(Promise.resolve(true));
 
   // View state controllers
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => routeFromPath(window.location.pathname).selectedProjectId);
@@ -79,18 +105,44 @@ export default function App() {
   // Standalone mode detection for multi-tab party ledgers
   const [standalonePartyName, setStandalonePartyName] = useState<string | null>(null);
 
+  const persistSettingsTracked = () => {
+    const savePromise = persistSettingsToSupabase();
+    pendingSettingsSaveRef.current = savePromise;
+    return savePromise;
+  };
+
   // Initialize data on mount
   useEffect(() => {
     let mounted = true;
 
     installSettingsPersistence();
 
-    hydrateSettingsFromSupabase()
-      .then(() => persistSettingsToSupabase())
-      .then(() => getDbData())
-      .then((data) => {
-        if (mounted) setDb(data);
-      });
+    const loadWorkspace = async () => {
+      await hydrateSettingsFromSupabase();
+      const workspace = await ensureActiveOrganization();
+      const settingsSynced = await persistSettingsTracked();
+      const result = await loadDbData();
+      if (isSupabaseConfigured && supabase) {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        setAccountLabel(user?.email || 'Cloud account');
+      } else {
+        setAccountLabel('Local workspace');
+      }
+      if (!mounted) return;
+      setActiveWorkspace(workspace);
+      setDb(result.data);
+      setDbLoadWarning(
+        !settingsSynced
+          ? 'Settings could not be synced to the cloud. Retry before signing out from this device.'
+          : result.source === 'fallback'
+          ? 'Cloud data could not be loaded. Showing local fallback data until sync is restored.'
+          : null,
+      );
+    };
+
+    void loadWorkspace();
 
     // Synchronize url params
     const params = new URLSearchParams(window.location.search);
@@ -105,13 +157,25 @@ export default function App() {
     };
 
     const handleStorageSync = async () => {
-      const data = await getDbData();
-      setDb(data);
+      const result = await loadDbData();
+      setDb(result.data);
+      setDbLoadWarning(
+        result.source === 'fallback'
+          ? 'Cloud data could not be loaded. Showing local fallback data until sync is restored.'
+          : null,
+      );
     };
     const handleSettingsSync = async () => {
-      await persistSettingsToSupabase();
-      const data = await getDbData();
-      setDb(data);
+      const settingsSynced = await persistSettingsTracked();
+      const result = await loadDbData();
+      setDb(result.data);
+      setDbLoadWarning(
+        !settingsSynced
+          ? 'Settings could not be synced to the cloud. Retry before signing out from this device.'
+          : result.source === 'fallback'
+          ? 'Cloud data could not be loaded. Showing local fallback data until sync is restored.'
+          : null,
+      );
     };
     window.addEventListener('custom-db-updated', handleStorageSync);
     window.addEventListener('custom-settings-updated', handleSettingsSync);
@@ -126,12 +190,50 @@ export default function App() {
   }, []);
 
   // Sync state helpers
-  const saveState = (updatedDb: typeof db): Promise<boolean> => {
+  const commitState = (updatedDb: typeof db, persistPromise: Promise<boolean>): Promise<boolean> => {
     if (!updatedDb) return Promise.resolve(false);
     setDb(updatedDb);
-    const savePromise = saveDbData(updatedDb);
-    pendingSaveRef.current = savePromise;
-    return savePromise;
+    cacheDbData(updatedDb);
+    pendingSaveRef.current = persistPromise;
+    return persistPromise;
+  };
+
+  const syncPaymentBillPhoto = async (payment: Payment) => {
+    if (!payment.billPhoto?.startsWith('data:')) return;
+
+    try {
+      const storagePath = await uploadPaymentBillDataUrl(payment.id, payment.billPhoto);
+      if (!storagePath) return;
+
+      setDb((currentDb) => {
+        if (!currentDb) return null;
+        const updatedPayments = currentDb.payments.map((item) =>
+          item.id === payment.id
+            ? {
+                ...item,
+                billPhotoStoragePath: storagePath,
+              }
+            : item,
+        );
+        const updatedDb = { ...currentDb, payments: updatedPayments };
+        cacheDbData(updatedDb);
+        const persistedPayment = updatedPayments.find((item) => item.id === payment.id);
+        if (persistedPayment) {
+          pendingSaveRef.current = persistPayment({
+            ...persistedPayment,
+            billPhoto: undefined,
+            billPhotoStoragePath: storagePath,
+          });
+        }
+        return updatedDb;
+      });
+    } catch (error) {
+      console.error('Bill photo upload failed:', error);
+      setAppNotice({
+        title: 'Bill Photo Upload Failed',
+        message: 'The transaction was saved, but the bill photo could not be uploaded. Try replacing the photo.',
+      });
+    }
   };
 
   if (!db) {
@@ -139,7 +241,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8 text-slate-400">
         <Logo size="lg" layout="column" />
         <span className="text-xs font-mono tracking-widest mt-4 animate-pulse">
-          INITIALIZING SECURE PORTFOLIOS...
+          Loading workspace...
         </span>
       </div>
     );
@@ -170,7 +272,7 @@ export default function App() {
       createdAt: new Date().toISOString().substring(0, 10), // auto device date
     };
 
-    // Auto-create client contact when adding project to save time on-site!
+    // Create a matching client contact for the new project.
     const newClientContact: Contact = {
       id: createRecordId(),
       name: clientName,
@@ -185,7 +287,7 @@ export default function App() {
       projects: [newProj, ...db.projects],
       contacts: [newClientContact, ...db.contacts],
     };
-    saveState(updated);
+    void commitState(updated, Promise.all([persistProject(newProj), persistContact(newClientContact)]).then((results) => results.every(Boolean)));
   };
 
   const handleUpdateStatus = (projectId: string, status: ProjectStatus) => {
@@ -196,8 +298,9 @@ export default function App() {
       return p;
     });
 
+    const updatedProject = updatedProjects.find((project) => project.id === projectId);
     const updated = { ...db, projects: updatedProjects };
-    saveState(updated);
+    void commitState(updated, updatedProject ? persistProject(updatedProject) : Promise.resolve(false));
   };
 
   const handleAddPayment = (paymentData: Omit<Payment, 'id'>) => {
@@ -210,7 +313,11 @@ export default function App() {
       ...db,
       payments: [newPay, ...db.payments],
     };
-    saveState(updated);
+    void commitState(updated, persistPayment(newPay));
+
+    if (newPay.billPhoto?.startsWith('data:')) {
+      void syncPaymentBillPhoto(newPay);
+    }
   };
 
   const handleEditPayment = (updatedPayment: Payment) => {
@@ -218,7 +325,11 @@ export default function App() {
       ...db,
       payments: db.payments.map((p) => (p.id === updatedPayment.id ? updatedPayment : p)),
     };
-    saveState(updated);
+    void commitState(updated, persistPayment(updatedPayment));
+
+    if (updatedPayment.billPhoto?.startsWith('data:')) {
+      void syncPaymentBillPhoto(updatedPayment);
+    }
   };
 
   const handleDeletePayment = (paymentId: string) => {
@@ -231,7 +342,7 @@ export default function App() {
           ...db,
           payments: db.payments.filter((p) => p.id !== paymentId),
         };
-        saveState(updated);
+        void commitState(updated, deletePayment(paymentId));
         setDeleteConfirm(null);
       }
     });
@@ -261,7 +372,7 @@ export default function App() {
       ...db,
       contacts: [newContact, ...db.contacts],
     };
-    saveState(updated);
+    void commitState(updated, persistContact(newContact));
   };
 
   const handleAddContacts = (
@@ -291,13 +402,20 @@ export default function App() {
       ...db,
       contacts: [...newContacts, ...db.contacts],
     };
-    return saveState(updated);
+    return commitState(updated, Promise.all(newContacts.map((contact) => persistContact(contact))).then((results) => results.every(Boolean)));
   };
 
   const handleSignOut = async () => {
-    const synced = await pendingSaveRef.current;
-    if (!synced) {
-      alert('Your latest changes have not synced to the cloud yet. Please try again before signing out.');
+    const [recordsSynced, settingsSynced] = await Promise.all([
+      pendingSaveRef.current,
+      pendingSettingsSaveRef.current,
+    ]);
+
+    if (!recordsSynced || !settingsSynced) {
+      setAppNotice({
+        title: 'Sync Pending',
+        message: 'Your latest changes have not synced to the cloud yet. Retry sync before signing out.',
+      });
       return;
     }
     if (isSupabaseConfigured && supabase) {
@@ -305,12 +423,32 @@ export default function App() {
     }
   };
 
+  const handleRetryCloudLoad = async () => {
+    const workspace = await ensureActiveOrganization();
+    const settingsSynced = await persistSettingsTracked();
+    const result = await loadDbData();
+    setActiveWorkspace(workspace);
+    setDb(result.data);
+    setDbLoadWarning(
+      !settingsSynced
+        ? 'Settings could not be synced to the cloud. Retry before signing out from this device.'
+        : result.source === 'fallback'
+        ? 'Cloud data could not be loaded. Showing local fallback data until sync is restored.'
+        : null,
+    );
+    if (settingsSynced && result.source !== 'fallback') {
+      setAppNotice(null);
+    }
+  };
+
   const handleUpdateContactRole = (contactId: string, role: ContactRole) => {
+    const updatedContacts = db.contacts.map((contact) => (contact.id === contactId ? { ...contact, role } : contact));
+    const updatedContact = updatedContacts.find((contact) => contact.id === contactId);
     const updated = {
       ...db,
-      contacts: db.contacts.map((contact) => (contact.id === contactId ? { ...contact, role } : contact)),
+      contacts: updatedContacts,
     };
-    saveState(updated);
+    void commitState(updated, updatedContact ? persistContact(updatedContact) : Promise.resolve(false));
   };
 
   const handleUpdateContact = (
@@ -325,21 +463,23 @@ export default function App() {
       address?: string;
     },
   ): Promise<boolean> => {
+    const updatedContacts = db.contacts.map((contact) =>
+      contact.id === contactId
+        ? {
+            ...contact,
+            ...contactData,
+            company: contactData.company || undefined,
+            gstNumber: contactData.gstNumber || undefined,
+            address: contactData.address || undefined,
+          }
+        : contact,
+    );
+    const updatedContact = updatedContacts.find((contact) => contact.id === contactId);
     const updated = {
       ...db,
-      contacts: db.contacts.map((contact) =>
-        contact.id === contactId
-          ? {
-              ...contact,
-              ...contactData,
-              company: contactData.company || undefined,
-              gstNumber: contactData.gstNumber || undefined,
-              address: contactData.address || undefined,
-            }
-          : contact,
-      ),
+      contacts: updatedContacts,
     };
-    return saveState(updated);
+    return commitState(updated, updatedContact ? persistContact(updatedContact) : Promise.resolve(false));
   };
 
   const handleDeleteContact = (contactId: string) => {
@@ -352,16 +492,28 @@ export default function App() {
           ...db,
           contacts: db.contacts.filter((c) => c.id !== contactId),
         };
-        saveState(updated);
+        void commitState(updated, deleteContact(contactId));
         setDeleteConfirm(null);
       }
     });
   };
 
-  // Automated sync pipeline simulation
+  // Document upload pipeline
   const handleAddDocument = (file: File, category: DocumentCategory) => {
     if (!selectedProjectId) {
-      alert('Select a project before uploading documents.');
+      setAppNotice({
+        title: 'Select A Project',
+        message: 'Open a project ledger before uploading documents.',
+      });
+      return;
+    }
+
+    const validationError = validateWorkspaceDocumentFile(file);
+    if (validationError) {
+      setAppNotice({
+        title: 'Document Not Added',
+        message: validationError,
+      });
       return;
     }
 
@@ -381,7 +533,7 @@ export default function App() {
       ...db,
       documents: [newDoc, ...db.documents],
     };
-    saveState(updated);
+    void commitState(updated, persistDocument(newDoc));
 
     void (async () => {
       let storagePath: string | null = null;
@@ -413,7 +565,12 @@ export default function App() {
             : document,
         );
         const finishedDb = { ...currentDb, documents: updatedDocs };
-        void saveDbData(finishedDb);
+        cacheDbData(finishedDb);
+        const finishedDocument = updatedDocs.find((document) => document.id === docId);
+        if (finishedDocument) {
+          const savePromise = persistDocument(finishedDocument);
+          pendingSaveRef.current = savePromise;
+        }
         return finishedDb;
       });
     })().catch((error) => {
@@ -426,7 +583,12 @@ export default function App() {
             document.id === docId ? { ...document, syncStatus: 'failed' as const } : document,
           ),
         };
-        void saveDbData(finishedDb);
+        cacheDbData(finishedDb);
+        const failedDocument = finishedDb.documents.find((document) => document.id === docId);
+        if (failedDocument) {
+          const savePromise = persistDocument(failedDocument);
+          pendingSaveRef.current = savePromise;
+        }
         return finishedDb;
       });
     });
@@ -445,7 +607,10 @@ export default function App() {
         window.open(document.dataUrl, '_blank', 'noopener,noreferrer');
         return;
       }
-      alert('This document record does not have a stored file payload yet.');
+      setAppNotice({
+        title: 'File Not Available',
+        message: 'This document record does not have a stored file payload yet.',
+      });
     })();
   };
 
@@ -459,14 +624,18 @@ export default function App() {
           ...db,
           documents: db.documents.filter((d) => d.id !== docId),
         };
-        saveState(updated);
+        void commitState(updated, deleteDocument(docId));
         setDeleteConfirm(null);
       }
     });
   };
 
   if (standalonePartyName) {
-    return <PartyLedgerStandalone partyName={standalonePartyName} />;
+    return (
+      <Suspense fallback={<ScreenFallback />}>
+        <PartyLedgerStandalone partyName={standalonePartyName} />
+      </Suspense>
+    );
   }
 
   const navItems = [
@@ -476,6 +645,8 @@ export default function App() {
     { id: 'reports' as const, label: 'Reports', icon: FileSpreadsheet },
     { id: 'settings' as const, label: 'Settings', icon: Settings },
   ];
+  const workspaceName = activeWorkspace?.name || (isSupabaseConfigured ? 'Personal Workspace' : 'Local Workspace');
+  const workspaceModeLabel = isSupabaseConfigured && supabase ? 'Cloud workspace' : 'Local workspace';
 
   const pageTitle = activeProject
     ? activeProject.name
@@ -550,9 +721,12 @@ export default function App() {
       <div className="flex min-h-screen">
         <aside className="hidden md:flex md:w-64 lg:w-72 shrink-0 flex-col border-r border-slate-950 bg-slate-950 text-slate-100" id="desktop-sidebar">
           <div className="border-b border-white/10 p-3 pt-6">
-            <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
-              <Building2 size={14} className="text-slate-400" />
-              <span className="truncate font-semibold">Default Workspace</span>
+            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+              <div className="flex items-center gap-2">
+                <Building2 size={14} className="shrink-0 text-slate-400" />
+                <span className="truncate font-semibold">{workspaceName}</span>
+              </div>
+              <span className="mt-1 block truncate pl-5 text-[10px] font-semibold text-slate-500">{workspaceModeLabel}</span>
             </div>
           </div>
 
@@ -592,6 +766,10 @@ export default function App() {
                 >
                   <Logo layout="row" size="sm" showSubtitle={true} onDark={false} allowChange={false} />
                 </button>
+                <div className="hidden min-w-0 border-l border-slate-200 pl-3 text-left md:block">
+                  <span className="block truncate text-xs font-bold text-slate-800">{workspaceName}</span>
+                  <span className="block truncate text-[10px] font-semibold text-slate-400">{workspaceModeLabel}</span>
+                </div>
               </div>
 
               <div className="flex items-center gap-2 md:gap-3">
@@ -637,18 +815,24 @@ export default function App() {
                   )}
                 </div>
                 {isSupabaseConfigured && supabase ? (
-                  <button
-                    onClick={() => void handleSignOut()}
-                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
-                    title="Sign out"
-                  >
-                    <LogOut size={15} />
-                    <span className="hidden sm:inline">Sign out</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <div className="hidden h-9 max-w-48 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 xl:flex">
+                      <UserCircle size={16} className="shrink-0" />
+                      <span className="truncate">{accountLabel}</span>
+                    </div>
+                    <button
+                      onClick={() => void handleSignOut()}
+                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                      title="Sign out"
+                    >
+                      <LogOut size={15} />
+                      <span className="hidden sm:inline">Sign out</span>
+                    </button>
+                  </div>
                 ) : (
                   <div className="hidden sm:flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600">
                     <UserCircle size={16} />
-                    <span>Local user</span>
+                    <span>{accountLabel}</span>
                   </div>
                 )}
               </div>
@@ -657,6 +841,41 @@ export default function App() {
 
           <main className="flex-1 p-4 pb-24 md:p-6 md:pb-8" id="main-content-canvas">
             <div className="mx-auto max-w-7xl">
+        {dbLoadWarning && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-xs font-semibold text-amber-800 shadow-xs">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <span>{dbLoadWarning}</span>
+              <button
+                type="button"
+                onClick={() => void handleRetryCloudLoad()}
+                className="self-start rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100 cursor-pointer sm:self-auto"
+              >
+                Retry sync
+              </button>
+            </div>
+          </div>
+        )}
+        {appNotice && (
+          <div className="mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-xs font-semibold text-slate-700 shadow-xs">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-2">
+                <AlertCircle size={15} className="mt-0.5 shrink-0 text-amber-600" />
+                <div>
+                  <span className="block font-extrabold text-slate-900">{appNotice.title}</span>
+                  <span className="block text-slate-500">{appNotice.message}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAppNotice(null)}
+                className="self-start rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer sm:self-auto"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+        <Suspense fallback={<ScreenFallback />}>
         {activeProject ? (
           /* SINGLE PROJECT INDEPTH LEDGER, BILLING, AND DOCUMENTS VIEW */
           <ProjectDetail
@@ -755,6 +974,7 @@ export default function App() {
             </div>
           </div>
         )}
+        </Suspense>
             </div>
           </main>
         </div>

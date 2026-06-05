@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, ShieldCheck, Check, RotateCcw, AlertCircle, Sparkles, Building, KeyRound, MapPin, ReceiptText, Database, Cloud, RefreshCw, UploadCloud, DownloadCloud, FileDown, FileUp, Save, Server, Users, UserPlus, Trash2, Edit, Plus, X, Briefcase } from 'lucide-react';
-import { getDbData, saveDbData } from '../lib/db';
+import { getDbData, prepareDbDataForBackup, saveDbData, validateDbDataPayload } from '../lib/db';
+import { persistSettingsToSupabase } from '../lib/settingsSync';
 import {
   DEFAULT_COMPANY_SETTINGS,
   DEFAULT_STAFF_SALARIES,
@@ -13,16 +14,7 @@ import {
 
 export default function SettingsManager() {
   const [formData, setFormData] = useState({
-    companyName: 'Catalyser Design',
-    address: 'Unit number 809, 99 Avenue, Lullanagar, Pune - 411040',
-    gstNumber: '27AAECC4524C1Z9',
-    email: 'contact@catalyserdesign.com',
-    phone: '+91 98765 43210',
-    bankAccountName: 'Catalyser Design',
-    bankName: 'HDFC Bank Ltd',
-    bankAccountNumber: '50200012345678',
-    bankAccountType: 'Current',
-    bankIfscCode: 'HDFC0001234'
+    ...DEFAULT_COMPANY_SETTINGS
   });
 
   const [logoBase64, setLogoBase64] = useState<string | null>(null);
@@ -35,6 +27,18 @@ export default function SettingsManager() {
   const [stampSaveSuccess, setStampSaveSuccess] = useState(false);
   const [signSaveSuccess, setSignSaveSuccess] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
+
+  const validateSettingsAsset = (file: File) => {
+    const supportedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']);
+    if (!supportedTypes.has(file.type)) {
+      return 'Use a JPEG, PNG, WebP, or SVG image.';
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      return 'Invoice image assets must be 2 MB or smaller.';
+    }
+    return null;
+  };
 
   // Staff and salary directory list states
   const [staffList, setStaffList] = useState<Array<{ id: string; name: string; role: string; salary: number }>>(() => {
@@ -49,13 +53,25 @@ export default function SettingsManager() {
   const [editingStaffRole, setEditingStaffRole] = useState('');
   const [editingStaffSalary, setEditingStaffSalary] = useState('');
 
-  const saveStaffList = (newList: Array<{ id: string; name: string; role: string; salary: number }>) => {
-    setStaffList(newList);
-    setSetting('cc_staff_salaries', JSON.stringify(newList));
+  const persistSettingsNow = async () => {
+    const saved = await persistSettingsToSupabase();
+    if (!saved) {
+      setSettingsSaveError('Saved locally, but cloud sync failed. Retry before signing out.');
+      return false;
+    }
+
+    setSettingsSaveError(null);
     window.dispatchEvent(new Event('custom-settings-updated'));
+    return true;
   };
 
-  const handleAddStaff = (e: React.FormEvent) => {
+  const saveStaffList = async (newList: Array<{ id: string; name: string; role: string; salary: number }>) => {
+    setStaffList(newList);
+    setSetting('cc_staff_salaries', JSON.stringify(newList));
+    return persistSettingsNow();
+  };
+
+  const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStaffName.trim() || !newStaffRole.trim() || !newStaffSalary) return;
     const val = parseFloat(newStaffSalary);
@@ -68,14 +84,15 @@ export default function SettingsManager() {
       salary: val
     };
 
-    saveStaffList([...staffList, newItem]);
+    const saved = await saveStaffList([...staffList, newItem]);
+    if (!saved) return;
     setNewStaffName('');
     setNewStaffRole('');
     setNewStaffSalary('');
   };
 
   const handleDeleteStaff = (id: string) => {
-    saveStaffList(staffList.filter(x => x.id !== id));
+    void saveStaffList(staffList.filter(x => x.id !== id));
   };
 
   const handleStartEditStaff = (item: { id: string; name: string; role: string; salary: number }) => {
@@ -85,12 +102,13 @@ export default function SettingsManager() {
     setEditingStaffSalary(item.salary.toString());
   };
 
-  const handleSaveEditStaff = (id: string) => {
+  const handleSaveEditStaff = async (id: string) => {
     if (!editingStaffName.trim() || !editingStaffRole.trim() || !editingStaffSalary) return;
     const val = parseFloat(editingStaffSalary);
     if (isNaN(val) || val <= 0) return;
 
-    saveStaffList(staffList.map(x => x.id === id ? { ...x, name: editingStaffName.trim(), role: editingStaffRole.trim(), salary: val } : x));
+    const saved = await saveStaffList(staffList.map(x => x.id === id ? { ...x, name: editingStaffName.trim(), role: editingStaffRole.trim(), salary: val } : x));
+    if (!saved) return;
     setEditingStaffId(null);
   };
 
@@ -133,16 +151,16 @@ export default function SettingsManager() {
     const bIfsc = getSetting('cc_bank_ifsc');
 
     setFormData({
-      companyName: cName || 'Catalyser Design',
-      address: cAddr || 'Unit number 809, 99 Avenue, Lullanagar, Pune - 411040',
-      gstNumber: cGst || '27AAECC4524C1Z9',
-      email: cEmail || 'contact@catalyserdesign.com',
-      phone: cPhone || '+91 98765 43210',
-      bankAccountName: bAccName || 'Catalyser Design',
-      bankName: bBankName || 'HDFC Bank Ltd',
-      bankAccountNumber: bAccNo || '50200012345678',
-      bankAccountType: bAccType || 'Current',
-      bankIfscCode: bIfsc || 'HDFC0001234'
+      companyName: cName || DEFAULT_COMPANY_SETTINGS.companyName,
+      address: cAddr || DEFAULT_COMPANY_SETTINGS.address,
+      gstNumber: cGst || DEFAULT_COMPANY_SETTINGS.gstNumber,
+      email: cEmail || DEFAULT_COMPANY_SETTINGS.email,
+      phone: cPhone || DEFAULT_COMPANY_SETTINGS.phone,
+      bankAccountName: bAccName || DEFAULT_COMPANY_SETTINGS.bankAccountName,
+      bankName: bBankName || DEFAULT_COMPANY_SETTINGS.bankName,
+      bankAccountNumber: bAccNo || DEFAULT_COMPANY_SETTINGS.bankAccountNumber,
+      bankAccountType: bAccType || DEFAULT_COMPANY_SETTINGS.bankAccountType,
+      bankIfscCode: bIfsc || DEFAULT_COMPANY_SETTINGS.bankIfscCode
     });
 
     if (logo) {
@@ -172,6 +190,13 @@ export default function SettingsManager() {
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const error = validateSettingsAsset(file);
+      if (error) {
+        setSettingsSaveError(error);
+        e.target.value = '';
+        return;
+      }
+      setSettingsSaveError(null);
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64 = reader.result as string;
@@ -181,15 +206,23 @@ export default function SettingsManager() {
     }
   };
 
-  const handleSaveLogo = () => {
+  const handleSaveLogo = async () => {
     setLogoBase64(pendingLogo);
     if (pendingLogo) {
       setSetting('custom_logo_base64', pendingLogo);
+      if (pendingLogo.startsWith('data:')) {
+        removeSetting('custom_logo_storage_path');
+      }
     } else {
       removeSetting('custom_logo_base64');
+      removeSetting('custom_logo_storage_path');
     }
     window.dispatchEvent(new Event('custom-logo-updated'));
-    window.dispatchEvent(new Event('custom-settings-updated'));
+    const saved = await persistSettingsNow();
+    if (!saved) return;
+    const savedLogo = getSetting('custom_logo_base64');
+    setLogoBase64(savedLogo);
+    setPendingLogo(savedLogo);
     setLogoSaveSuccess(true);
     setTimeout(() => setLogoSaveSuccess(false), 3000);
   };
@@ -201,6 +234,13 @@ export default function SettingsManager() {
   const handleStampUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const error = validateSettingsAsset(file);
+      if (error) {
+        setSettingsSaveError(error);
+        e.target.value = '';
+        return;
+      }
+      setSettingsSaveError(null);
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64 = reader.result as string;
@@ -210,18 +250,30 @@ export default function SettingsManager() {
     }
   };
 
-  const handleSaveStamp = () => {
+  const handleSaveStamp = async () => {
     setStampBase64(pendingStamp);
     if (pendingStamp) {
       setSetting('custom_stamp_base64', pendingStamp);
-      // Synchronize with the older unified key as fallback for other parts of system
       setSetting('custom_stamp_sign_base64', pendingStamp);
+      if (pendingStamp.startsWith('data:')) {
+        removeSetting('custom_stamp_storage_path');
+        removeSetting('custom_stamp_sign_storage_path');
+      }
     } else {
       removeSetting('custom_stamp_base64');
+      removeSetting('custom_stamp_storage_path');
       removeSetting('custom_stamp_sign_base64');
+      removeSetting('custom_stamp_sign_storage_path');
     }
     window.dispatchEvent(new Event('custom-stamp-updated'));
-    window.dispatchEvent(new Event('custom-settings-updated'));
+    const saved = await persistSettingsNow();
+    if (!saved) return;
+    let savedStamp = getSetting('custom_stamp_base64');
+    if (!savedStamp) {
+      savedStamp = getSetting('custom_stamp_sign_base64');
+    }
+    setStampBase64(savedStamp);
+    setPendingStamp(savedStamp);
     setStampSaveSuccess(true);
     setTimeout(() => setStampSaveSuccess(false), 3000);
   };
@@ -233,6 +285,13 @@ export default function SettingsManager() {
   const handleSignUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const error = validateSettingsAsset(file);
+      if (error) {
+        setSettingsSaveError(error);
+        e.target.value = '';
+        return;
+      }
+      setSettingsSaveError(null);
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64 = reader.result as string;
@@ -242,15 +301,23 @@ export default function SettingsManager() {
     }
   };
 
-  const handleSaveSign = () => {
+  const handleSaveSign = async () => {
     setSignBase64(pendingSign);
     if (pendingSign) {
       setSetting('custom_sign_base64', pendingSign);
+      if (pendingSign.startsWith('data:')) {
+        removeSetting('custom_sign_storage_path');
+      }
     } else {
       removeSetting('custom_sign_base64');
+      removeSetting('custom_sign_storage_path');
     }
     window.dispatchEvent(new Event('custom-sign-updated'));
-    window.dispatchEvent(new Event('custom-settings-updated'));
+    const saved = await persistSettingsNow();
+    if (!saved) return;
+    const savedSign = getSetting('custom_sign_base64');
+    setSignBase64(savedSign);
+    setPendingSign(savedSign);
     setSignSaveSuccess(true);
     setTimeout(() => setSignSaveSuccess(false), 3000);
   };
@@ -259,7 +326,7 @@ export default function SettingsManager() {
     setPendingSign(null);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSetting('cc_company_name', formData.companyName);
     setSetting('cc_company_address', formData.address);
@@ -272,14 +339,13 @@ export default function SettingsManager() {
     setSetting('cc_bank_account_type', formData.bankAccountType);
     setSetting('cc_bank_ifsc', formData.bankIfscCode);
 
-    // Dispatch event to announce update to other components immediately
-    window.dispatchEvent(new Event('custom-settings-updated'));
-
+    const saved = await persistSettingsNow();
+    if (!saved) return;
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 
-  const handleResetDefaults = () => {
+  const handleResetDefaults = async () => {
     resetSettingsMemory();
 
     setFormData({
@@ -300,29 +366,29 @@ export default function SettingsManager() {
     window.dispatchEvent(new Event('custom-logo-updated'));
     window.dispatchEvent(new Event('custom-stamp-updated'));
     window.dispatchEvent(new Event('custom-sign-updated'));
-    window.dispatchEvent(new Event('custom-settings-updated'));
 
+    const saved = await persistSettingsNow();
+    if (!saved) return;
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 
-  const handleSaveStorageSettings = (e: React.FormEvent) => {
+  const handleSaveStorageSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setSetting('cc_storage_type', storageType);
     setSetting('cc_storage_local_prefix', localPrefix);
     setSetting('cc_storage_cloud_endpoint', cloudEndpoint);
     setSetting('cc_storage_cloud_auth', cloudAuth);
 
-    // Dispatch event to announce update
     window.dispatchEvent(new Event('custom-db-updated'));
-    window.dispatchEvent(new Event('custom-settings-updated'));
-
+    const saved = await persistSettingsNow();
+    if (!saved) return;
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 
   const handleExportDB = async () => {
-    const data = await getDbData();
+    const data = prepareDbDataForBackup(await getDbData());
     const dbDump = {
       exportedAt: new Date().toISOString(),
       data
@@ -342,23 +408,23 @@ export default function SettingsManager() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
-        if (parsed && parsed.data && Array.isArray(parsed.data.projects)) {
-          void saveDbData({
-            projects: parsed.data.projects,
-            payments: parsed.data.payments || [],
-            contacts: parsed.data.contacts || [],
-            documents: parsed.data.documents || []
-          });
-
-          window.dispatchEvent(new Event('custom-db-updated'));
-          window.dispatchEvent(new Event('custom-settings-updated'));
-
-          setImportStatus({ success: true, message: 'Imported successfully into workspace persistence.' });
+        const validation = validateDbDataPayload(parsed?.data);
+        if ('message' in validation) {
+          setImportStatus({ success: false, message: validation.message });
         } else {
-          setImportStatus({ success: false, message: 'Invalid payload structure. Make sure "data.projects" contains a valid list.' });
+          const saved = await saveDbData(validation.data);
+
+          if (saved) {
+            window.dispatchEvent(new Event('custom-db-updated'));
+            window.dispatchEvent(new Event('custom-settings-updated'));
+
+            setImportStatus({ success: true, message: 'Backup imported.' });
+          } else {
+            setImportStatus({ success: false, message: 'Import parsed, but database persistence failed. Retry before using this backup.' });
+          }
         }
       } catch (err) {
         setImportStatus({ success: false, message: 'Failed to read database parameters from JSON.' });
@@ -410,7 +476,7 @@ export default function SettingsManager() {
         body: JSON.stringify(data)
       });
       if (res.ok) {
-        setSyncStatus({ type: 'push', success: true, message: 'Local data uploaded successfully.' });
+        setSyncStatus({ type: 'push', success: true, message: 'Workspace data uploaded.' });
       } else {
         setSyncStatus({ type: 'push', success: false, message: `Sync rejected. Server status: ${res.status}.` });
       }
@@ -438,19 +504,21 @@ export default function SettingsManager() {
         if (info.data && Array.isArray(info.data.projects)) payload = info.data;
         else if (info.record && Array.isArray(info.record.projects)) payload = info.record;
       }
-      if (payload && Array.isArray(payload.projects)) {
-        void saveDbData({
-          projects: payload.projects,
-          payments: payload.payments || [],
-          contacts: payload.contacts || [],
-          documents: payload.documents || []
-        });
+      const validation = validateDbDataPayload(payload);
+      if ('message' in validation) {
+        setSyncStatus({ type: 'pull', success: false, message: validation.message });
+      } else {
+        const saved = await saveDbData(validation.data);
+
+        if (!saved) {
+          setSyncStatus({ type: 'pull', success: false, message: 'Pulled data, but database persistence failed. Retry before using this restore.' });
+          setTimeout(() => setSyncStatus(null), 6000);
+          return;
+        }
 
         window.dispatchEvent(new Event('custom-db-updated'));
         window.dispatchEvent(new Event('custom-settings-updated'));
-        setSyncStatus({ type: 'pull', success: true, message: 'Pulled cloud state locally!' });
-      } else {
-        setSyncStatus({ type: 'pull', success: false, message: 'No matching "projects" hierarchy found in server payload.' });
+        setSyncStatus({ type: 'pull', success: true, message: 'External data restored.' });
       }
     } catch (err: any) {
       setSyncStatus({ type: 'pull', success: false, message: `Sync pull failed: ${err?.message}` });
@@ -464,10 +532,10 @@ export default function SettingsManager() {
       <div className="bg-white p-5 rounded-2xl border border-slate-150 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
         <div>
           <h3 className="font-black text-slate-800 text-base uppercase tracking-wide flex items-center gap-1.5">
-            <Settings size={18} className="text-blue-600 animate-spin-slow" /> Core Studio Parameters
+            <Settings size={18} className="text-blue-600 animate-spin-slow" /> Settings
           </h3>
           <p className="text-xs text-slate-500 mt-1">
-            Manage your firm's visual identity, contact coordinates, billing address, and certified GSTIN identification settings.
+            Manage firm details, invoice assets, payroll, and backup settings.
           </p>
         </div>
         <button
@@ -475,22 +543,29 @@ export default function SettingsManager() {
           onClick={handleResetDefaults}
           className="px-3.5 py-1.5 border border-slate-205 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-xl transition font-bold text-xs flex items-center gap-1.5 cursor-pointer"
         >
-          <RotateCcw size={13} /> Clear to Defaults
+          <RotateCcw size={13} /> Reset Defaults
         </button>
       </div>
+
+      {settingsSaveError && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800 flex items-start gap-2">
+          <AlertCircle size={15} className="mt-0.5 shrink-0 text-amber-600" />
+          <span>{settingsSaveError}</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Form Settings Left Pane */}
         <form onSubmit={handleSubmit} className="lg:col-span-2 space-y-6 bg-white p-6 rounded-2xl border border-slate-150">
           <div className="space-y-4">
             <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-widest flex items-center gap-1.5 pb-2 border-b">
-              <Building size={14} className="text-blue-600" /> Firm Profiling Directory
+              <Building size={14} className="text-blue-600" /> Company Profile
             </h4>
 
             {saveSuccess && (
               <div className="bg-emerald-5 border border-emerald-250 p-4 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-150 shadow-2xs">
                 <Check size={16} className="text-emerald-600 shrink-0" />
-                Company profile attributes synchronized and stored successfully! All invoices and billing statements now display these revised coordinates.
+                Company profile saved.
               </div>
             )}
 
@@ -509,7 +584,7 @@ export default function SettingsManager() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-450 uppercase tracking-wider block">Firm GSTIN (Tax Identification)</label>
+                <label className="text-[10px] font-bold text-slate-450 uppercase tracking-wider block">GSTIN</label>
                 <input
                   type="text"
                   required
@@ -517,7 +592,7 @@ export default function SettingsManager() {
                   value={formData.gstNumber}
                   onChange={handleChange}
                   className="w-full bg-slate-50 border border-slate-205 rounded-xl p-3 text-xs font-mono font-bold text-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 transition uppercase"
-                  placeholder="e.g. 27AAECC4524C1Z9"
+                  placeholder="GSTIN"
                 />
               </div>
             </div>
@@ -550,7 +625,7 @@ export default function SettingsManager() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-455 uppercase tracking-wider block">Office Hotline / Phone Number</label>
+                <label className="text-[10px] font-bold text-slate-455 uppercase tracking-wider block">Phone Number</label>
                 <input
                   type="text"
                   required
@@ -566,10 +641,10 @@ export default function SettingsManager() {
             {/* Bank details input block */}
             <div className="space-y-4 pt-4 border-t border-slate-100/80">
               <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-widest flex items-center gap-1.5 pb-2 border-b">
-                <Database size={13} className="text-blue-600" /> Commercial Bank Coordinates
+                <Database size={13} className="text-blue-600" /> Bank Details
               </h4>
               <p className="text-[10px] text-slate-450 leading-relaxed">
-                Configure corporate banking indicators. These verified bank fields are automatically loaded at the bottom of generated client invoice PDFs.
+                These fields appear on generated invoices.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -587,7 +662,7 @@ export default function SettingsManager() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-450 uppercase tracking-wider block">Bank Institution Name</label>
+                  <label className="text-[10px] font-bold text-slate-450 uppercase tracking-wider block">Bank Name</label>
                   <input
                     type="text"
                     required
@@ -595,7 +670,7 @@ export default function SettingsManager() {
                     value={formData.bankName}
                     onChange={handleChange}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 transition"
-                    placeholder="e.g. HDFC Bank Ltd"
+                    placeholder="Bank name"
                   />
                 </div>
               </div>
@@ -610,12 +685,12 @@ export default function SettingsManager() {
                     value={formData.bankAccountNumber}
                     onChange={handleChange}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 transition"
-                    placeholder="e.g. 50200012345678"
+                    placeholder="Account number"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-455 uppercase tracking-wider block">Account Category / Type</label>
+                  <label className="text-[10px] font-bold text-slate-455 uppercase tracking-wider block">Account Type</label>
                   <input
                     type="text"
                     required
@@ -628,7 +703,7 @@ export default function SettingsManager() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-455 uppercase tracking-wider block">IFSC Transit Code</label>
+                  <label className="text-[10px] font-bold text-slate-455 uppercase tracking-wider block">IFSC Code</label>
                   <input
                     type="text"
                     required
@@ -636,7 +711,7 @@ export default function SettingsManager() {
                     value={formData.bankIfscCode}
                     onChange={handleChange}
                     className="w-full bg-slate-50 border border-slate-205 rounded-xl p-3 text-xs font-mono font-bold text-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 transition uppercase"
-                    placeholder="e.g. HDFC0001234"
+                    placeholder="IFSC code"
                   />
                 </div>
               </div>
@@ -648,7 +723,7 @@ export default function SettingsManager() {
               type="submit"
               className="bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs px-5 py-3 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm border-none"
             >
-              <Check size={14} /> Save Profile Parameters
+              <Check size={14} /> Save Profile
             </button>
           </div>
         </form>
@@ -657,13 +732,13 @@ export default function SettingsManager() {
         <div className="space-y-6">
           <div className="bg-white p-5 rounded-2xl border border-slate-150 text-left space-y-4 flex flex-col justify-between h-auto">
             <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-widest flex items-center gap-1.5 pb-2 border-b">
-              <Sparkles size={14} className="text-blue-600" /> Logo Branding Suite
+              <Sparkles size={14} className="text-blue-600" /> Logo
             </h4>
 
             {logoSaveSuccess && (
               <div className="bg-emerald-50 border border-emerald-250 p-3 rounded-xl text-emerald-800 text-[10.5px] font-bold flex items-center gap-1.5 animate-in fade-in duration-150 shadow-2xs">
                 <Check size={14} className="text-emerald-600 shrink-0" />
-                Logo branding coordinates updated successfully!
+                Logo saved.
               </div>
             )}
 
@@ -689,13 +764,12 @@ export default function SettingsManager() {
                 </div>
               ) : (
                 <div className="space-y-3 flex flex-col items-center">
-                  {/* Default styled dummy logo icon representation from Logo.tsx preview */}
                   <div className="w-16 h-16 bg-blue-100 flex items-center justify-center text-blue-600 rounded-xl font-bold text-xl select-none font-sans border border-blue-200">
                     CD
                   </div>
                   <div className="space-y-1">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block font-mono">Default Vector Blueprint</span>
-                    <p className="text-[10px] text-slate-400 max-w-[200px]">No design uploads matched. Upload custom client-facing logo brand below.</p>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block font-mono">Default Logo</span>
+                    <p className="text-[10px] text-slate-400 max-w-[200px]">Upload a logo to use on invoices and reports.</p>
                   </div>
                 </div>
               )}
@@ -711,7 +785,7 @@ export default function SettingsManager() {
             {/* Upload form block */}
             <div className="space-y-2.5">
               <label className="text-[10px] font-bold text-slate-450 uppercase tracking-wider block">
-                Choose Logo Image File (PNG, JPEG, SVG)
+                Logo File (PNG, JPEG, SVG)
               </label>
               <input
                 type="file"
@@ -724,7 +798,7 @@ export default function SettingsManager() {
                 htmlFor="brand-logo-file-picker"
                 className="w-full text-center border-2 border-dashed border-slate-205 hover:border-blue-450 p-4 rounded-xl text-xs font-bold text-slate-500 hover:text-blue-600 cursor-pointer block transition bg-slate-50/50 hover:bg-slate-50"
               >
-                📥 Choose Logo Image
+                Choose Logo File
               </label>
             </div>
 
@@ -741,7 +815,7 @@ export default function SettingsManager() {
                 }`}
               >
                 <Save size={13} />
-                <span>Save Logo Branding</span>
+                <span>Save Logo</span>
               </button>
             </div>
           </div>
@@ -749,13 +823,13 @@ export default function SettingsManager() {
           {/* Company Rubber Stamp card */}
           <div className="bg-white p-5 rounded-2xl border border-slate-150 text-left space-y-4 flex flex-col justify-between h-auto">
             <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-widest flex items-center gap-1.5 pb-2 border-b">
-              <Sparkles size={14} className="text-blue-600" /> Company Rubber Stamp
+              <Sparkles size={14} className="text-blue-600" /> Company Stamp
             </h4>
 
             {stampSaveSuccess && (
               <div className="bg-emerald-50 border border-emerald-250 p-3 rounded-xl text-emerald-800 text-[10.5px] font-bold flex items-center gap-1.5 animate-in fade-in duration-150 shadow-2xs">
                 <Check size={14} className="text-emerald-600 shrink-0" />
-                Company rubber stamp uploaded and saved successfully!
+                Stamp saved.
               </div>
             )}
 
@@ -786,7 +860,7 @@ export default function SettingsManager() {
                   </div>
                   <div className="space-y-1">
                     <span className="text-[10px] uppercase font-bold text-slate-400 block font-mono">No Custom Stamp</span>
-                    <p className="text-[10px] text-slate-400 max-w-[200px]">Upload a clear transparent or soft copy image of your official business rubber stamp.</p>
+                    <p className="text-[10px] text-slate-400 max-w-[200px]">Upload a clear stamp image for invoice output.</p>
                   </div>
                 </div>
               )}
@@ -802,7 +876,7 @@ export default function SettingsManager() {
             {/* Upload form block */}
             <div className="space-y-2.5">
               <label className="text-[10px] font-bold text-slate-450 uppercase tracking-wider block">
-                Choose Stamp Copy (PNG, JPEG, WebP)
+                Stamp File (PNG, JPEG, WebP)
               </label>
               <input
                 type="file"
@@ -815,7 +889,7 @@ export default function SettingsManager() {
                 htmlFor="stamp-file-picker"
                 className="w-full text-center border-2 border-dashed border-slate-205 hover:border-blue-450 p-4 rounded-xl text-xs font-bold text-slate-500 hover:text-blue-600 cursor-pointer block transition bg-slate-50/50 hover:bg-slate-50"
               >
-                📥 Choose Stamp File
+                Choose Stamp File
               </label>
             </div>
 
@@ -832,7 +906,7 @@ export default function SettingsManager() {
                 }`}
               >
                 <Save size={13} />
-                <span>Save Rubber Stamp</span>
+                <span>Save Stamp</span>
               </button>
             </div>
           </div>
@@ -846,7 +920,7 @@ export default function SettingsManager() {
             {signSaveSuccess && (
               <div className="bg-emerald-50 border border-emerald-250 p-3 rounded-xl text-emerald-800 text-[10.5px] font-bold flex items-center gap-1.5 animate-in fade-in duration-150 shadow-2xs">
                 <Check size={14} className="text-emerald-600 shrink-0" />
-                Authorized signature saved successfully!
+                Signature saved.
               </div>
             )}
 
@@ -877,7 +951,7 @@ export default function SettingsManager() {
                   </div>
                   <div className="space-y-1">
                     <span className="text-[10px] uppercase font-bold text-slate-400 block font-mono">No Custom Signature</span>
-                    <p className="text-[10px] text-slate-400 max-w-[200px]">Upload a clear transparent or soft copy image of the authorized signatory signature.</p>
+                    <p className="text-[10px] text-slate-400 max-w-[200px]">Upload the authorized signature used on invoices.</p>
                   </div>
                 </div>
               )}
@@ -893,7 +967,7 @@ export default function SettingsManager() {
             {/* Upload form block */}
             <div className="space-y-2.5">
               <label className="text-[10px] font-bold text-slate-450 uppercase tracking-wider block">
-                Choose Signature Copy (PNG, JPEG, WebP)
+                Signature File (PNG, JPEG, WebP)
               </label>
               <input
                 type="file"
@@ -906,7 +980,7 @@ export default function SettingsManager() {
                 htmlFor="sign-file-picker"
                 className="w-full text-center border-2 border-dashed border-slate-205 hover:border-emerald-450 p-4 rounded-xl text-xs font-bold text-slate-500 hover:text-emerald-750 cursor-pointer block transition bg-slate-50/50 hover:bg-slate-50"
               >
-                📥 Choose Signature File
+                Choose Signature File
               </label>
             </div>
 
@@ -923,7 +997,7 @@ export default function SettingsManager() {
                 }`}
               >
                 <Save size={13} />
-                <span>Save Signature File</span>
+                <span>Save Signature</span>
               </button>
             </div>
           </div>
@@ -935,10 +1009,10 @@ export default function SettingsManager() {
                 <ShieldCheck size={18} />
               </div>
               <div className="space-y-1">
-                <span className="text-[10px] font-mono tracking-wider font-bold text-slate-400 block uppercase">Audit Safe Security</span>
-                <h5 className="font-extrabold text-white text-xs">Enterprise Persistence</h5>
+                <span className="text-[10px] font-mono tracking-wider font-bold text-slate-400 block uppercase">Persistence</span>
+                <h5 className="font-extrabold text-white text-xs">Cloud Sync</h5>
                 <p className="text-[10px] text-slate-405 leading-relaxed">
-                  Company settings, payroll configuration, invoice assets, and workspace records persist through the configured Supabase database and private storage policies.
+                  Settings, payroll, invoice assets, and workspace records sync through Supabase.
                 </p>
               </div>
             </div>
@@ -952,14 +1026,14 @@ export default function SettingsManager() {
           <div className="space-y-0.5">
             <h3 className="font-extrabold text-slate-850 text-sm md:text-base flex items-center gap-2">
               <Users size={18} className="text-blue-600" />
-              Staff Roster &amp; Monthly Payroll Configuration
+              Staff &amp; Payroll
             </h3>
             <p className="text-xs text-slate-400">
-              Manage internal office staff, architects, designers, and logistical retainerships. Monthly payroll sums automatically feed into your Studio Overhead calculations.
+              Monthly payroll feeds into overhead calculations.
             </p>
           </div>
           <div className="text-[11px] font-bold text-slate-705 bg-slate-100 border border-slate-150 px-3 py-1.5 rounded-lg shrink-0">
-            Total Payroll: <span className="text-blue-600 font-extrabold font-mono text-xs">₹{staffList.reduce((acc, x) => acc + x.salary, 0).toLocaleString()}</span>
+            Total Payroll: <span className="text-blue-600 font-extrabold font-mono text-xs">INR {staffList.reduce((acc, x) => acc + x.salary, 0).toLocaleString()}</span>
           </div>
         </div>
 
@@ -968,9 +1042,9 @@ export default function SettingsManager() {
           <table className="w-full text-left text-xs text-slate-600 border-collapse">
             <thead>
               <tr className="border-b border-slate-100 text-slate-400 uppercase font-mono text-[9px] tracking-wider">
-                <th className="py-2.5 font-bold">Staff Member Name</th>
-                <th className="py-2.5 font-bold">Designation/Contract Role</th>
-                <th className="py-2.5 font-bold text-right w-40">Monthly Compensation (₹)</th>
+                <th className="py-2.5 font-bold">Name</th>
+                <th className="py-2.5 font-bold">Role</th>
+                <th className="py-2.5 font-bold text-right w-40">Monthly Pay (INR)</th>
                 <th className="py-2.5 font-bold text-center w-28">Actions</th>
               </tr>
             </thead>
@@ -978,7 +1052,7 @@ export default function SettingsManager() {
               {staffList.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="py-6 text-center text-slate-400 italic">
-                    No active staff configurations registered. Add your first design associate below!
+                    No staff records yet.
                   </td>
                 </tr>
               ) : (
@@ -1023,7 +1097,7 @@ export default function SettingsManager() {
                           />
                         </div>
                       ) : (
-                        <span className="font-mono font-bold text-slate-700">₹{item.salary.toLocaleString()}</span>
+                        <span className="font-mono font-bold text-slate-700">INR {item.salary.toLocaleString()}</span>
                       )}
                     </td>
                     <td className="py-3 text-center">

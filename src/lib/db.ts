@@ -170,18 +170,215 @@ const INITIAL_PAYMENTS: Payment[] = [
 const INITIAL_DOCUMENTS: CloudDocument[] = [];
 let memoryDbData: DbData | null = null;
 
+const EMPTY_DB_DATA: DbData = {
+  projects: [],
+  payments: [],
+  contacts: [],
+  documents: [],
+};
+
+export type DbLoadResult = {
+  data: DbData;
+  source: 'supabase' | 'local' | 'fallback';
+  error?: unknown;
+};
+
+export type DbValidationResult =
+  | { valid: true; data: DbData }
+  | { valid: false; message: string };
+
+const PROJECT_STATUSES = new Set(['ongoing', 'completed', 'onhold']);
+const PAYMENT_TYPES = new Set(['in', 'out']);
+const PAYMENT_MODES = new Set(['cash', 'bank_transfer', 'upi', 'cheque', 'card']);
+const CONTACT_ROLES = new Set(['client', 'vendor', 'supplier', 'contractor', 'site_worker', 'other']);
+const DOCUMENT_CATEGORIES = new Set(['invoice', 'receipt', 'blueprint', 'estimate', 'contract', 'other']);
+const DOCUMENT_SYNC_STATUSES = new Set(['synced', 'syncing', 'failed']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return isString(value) && value.trim().length > 0;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return isString(value) && value.trim() ? value : undefined;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function validationError(message: string): DbValidationResult {
+  return { valid: false, message };
+}
+
+function assertUniqueIds(rows: Array<{ id: string }>, label: string): DbValidationResult | null {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (ids.has(row.id)) {
+      return validationError(`Duplicate ${label} id "${row.id}" in import payload.`);
+    }
+    ids.add(row.id);
+  }
+  return null;
+}
+
+export function validateDbDataPayload(value: unknown): DbValidationResult {
+  if (!isRecord(value)) {
+    return validationError('Backup payload must be an object.');
+  }
+
+  if (!Array.isArray(value.projects)) {
+    return validationError('Backup payload must include a projects array.');
+  }
+
+  const rawPayments = Array.isArray(value.payments) ? value.payments : [];
+  const rawContacts = Array.isArray(value.contacts) ? value.contacts : [];
+  const rawDocuments = Array.isArray(value.documents) ? value.documents : [];
+
+  const projects: Project[] = [];
+  for (const [index, item] of value.projects.entries()) {
+    if (!isRecord(item)) return validationError(`Project ${index + 1} must be an object.`);
+    if (!isNonEmptyString(item.id)) return validationError(`Project ${index + 1} is missing a valid id.`);
+    if (!isNonEmptyString(item.name)) return validationError(`Project "${item.id}" is missing a name.`);
+    if (!PROJECT_STATUSES.has(String(item.status))) return validationError(`Project "${item.id}" has an invalid status.`);
+    if (!isFiniteNumber(item.budget) || item.budget < 0) return validationError(`Project "${item.id}" has an invalid budget.`);
+    if (!isNonEmptyString(item.clientName)) return validationError(`Project "${item.id}" is missing a client name.`);
+    if (!isNonEmptyString(item.createdAt)) return validationError(`Project "${item.id}" is missing a created date.`);
+
+    projects.push({
+      id: item.id,
+      name: item.name,
+      description: isString(item.description) ? item.description : '',
+      status: item.status as Project['status'],
+      budget: item.budget,
+      clientName: item.clientName,
+      address: optionalString(item.address),
+      createdAt: item.createdAt,
+    });
+  }
+
+  const duplicateProject = assertUniqueIds(projects, 'project');
+  if (duplicateProject) return duplicateProject;
+
+  const projectIds = new Set(projects.map((project) => project.id));
+
+  const payments: Payment[] = [];
+  for (const [index, item] of rawPayments.entries()) {
+    if (!isRecord(item)) return validationError(`Payment ${index + 1} must be an object.`);
+    if (!isNonEmptyString(item.id)) return validationError(`Payment ${index + 1} is missing a valid id.`);
+    if (!isNonEmptyString(item.projectId) || !projectIds.has(item.projectId)) {
+      return validationError(`Payment "${item.id}" references a missing project.`);
+    }
+    if (!PAYMENT_TYPES.has(String(item.type))) return validationError(`Payment "${item.id}" has an invalid type.`);
+    if (!isFiniteNumber(item.amount) || item.amount <= 0) return validationError(`Payment "${item.id}" has an invalid amount.`);
+    if (!isNonEmptyString(item.party)) return validationError(`Payment "${item.id}" is missing a party.`);
+    if (!CONTACT_ROLES.has(String(item.partyRole))) return validationError(`Payment "${item.id}" has an invalid party role.`);
+    if (!PAYMENT_MODES.has(String(item.paymentMode))) return validationError(`Payment "${item.id}" has an invalid payment mode.`);
+    if (!isNonEmptyString(item.date)) return validationError(`Payment "${item.id}" is missing a date.`);
+
+    payments.push({
+      id: item.id,
+      projectId: item.projectId,
+      type: item.type as Payment['type'],
+      amount: item.amount,
+      party: item.party,
+      partyRole: item.partyRole as Payment['partyRole'],
+      paymentMode: item.paymentMode as Payment['paymentMode'],
+      remark: isString(item.remark) ? item.remark : '',
+      date: item.date,
+      billPhoto: optionalString(item.billPhoto),
+      billPhotoStoragePath: optionalString(item.billPhotoStoragePath),
+    });
+  }
+
+  const duplicatePayment = assertUniqueIds(payments, 'payment');
+  if (duplicatePayment) return duplicatePayment;
+
+  const contacts: Contact[] = [];
+  for (const [index, item] of rawContacts.entries()) {
+    if (!isRecord(item)) return validationError(`Contact ${index + 1} must be an object.`);
+    if (!isNonEmptyString(item.id)) return validationError(`Contact ${index + 1} is missing a valid id.`);
+    if (!isNonEmptyString(item.name)) return validationError(`Contact "${item.id}" is missing a name.`);
+    if (!CONTACT_ROLES.has(String(item.role))) return validationError(`Contact "${item.id}" has an invalid role.`);
+
+    contacts.push({
+      id: item.id,
+      name: item.name,
+      role: item.role as Contact['role'],
+      phone: isString(item.phone) ? item.phone : '',
+      email: isString(item.email) ? item.email : '',
+      company: optionalString(item.company),
+      gstNumber: optionalString(item.gstNumber),
+      address: optionalString(item.address),
+    });
+  }
+
+  const duplicateContact = assertUniqueIds(contacts, 'contact');
+  if (duplicateContact) return duplicateContact;
+
+  const documents: CloudDocument[] = [];
+  for (const [index, item] of rawDocuments.entries()) {
+    if (!isRecord(item)) return validationError(`Document ${index + 1} must be an object.`);
+    if (!isNonEmptyString(item.id)) return validationError(`Document ${index + 1} is missing a valid id.`);
+    if (!isNonEmptyString(item.projectId) || !projectIds.has(item.projectId)) {
+      return validationError(`Document "${item.id}" references a missing project.`);
+    }
+    if (!isNonEmptyString(item.name)) return validationError(`Document "${item.id}" is missing a name.`);
+    if (!DOCUMENT_CATEGORIES.has(String(item.category))) return validationError(`Document "${item.id}" has an invalid category.`);
+    if (!isFiniteNumber(item.size) || item.size < 0) return validationError(`Document "${item.id}" has an invalid file size.`);
+    if (!isNonEmptyString(item.uploadedAt)) return validationError(`Document "${item.id}" is missing an upload date.`);
+    if (!DOCUMENT_SYNC_STATUSES.has(String(item.syncStatus))) return validationError(`Document "${item.id}" has an invalid sync status.`);
+    if (!isNonEmptyString(item.fileType)) return validationError(`Document "${item.id}" is missing a file type.`);
+
+    documents.push({
+      id: item.id,
+      projectId: item.projectId,
+      name: item.name,
+      category: item.category as CloudDocument['category'],
+      size: item.size,
+      uploadedAt: item.uploadedAt,
+      syncStatus: item.syncStatus as CloudDocument['syncStatus'],
+      fileType: item.fileType,
+      dataUrl: optionalString(item.dataUrl),
+      storagePath: optionalString(item.storagePath),
+    });
+  }
+
+  const duplicateDocument = assertUniqueIds(documents, 'document');
+  if (duplicateDocument) return duplicateDocument;
+
+  return {
+    valid: true,
+    data: {
+      projects,
+      payments,
+      contacts,
+      documents,
+    },
+  };
+}
+
 function hasDocumentPayload(document: CloudDocument) {
   return document.syncStatus !== 'synced' || Boolean(document.storagePath || document.dataUrl);
 }
 
 export function getLocalDbData(): DbData {
   if (!memoryDbData) {
-    memoryDbData = {
-      projects: INITIAL_PROJECTS,
-      payments: INITIAL_PAYMENTS,
-      contacts: INITIAL_CONTACTS,
-      documents: INITIAL_DOCUMENTS,
-    };
+    memoryDbData = import.meta.env.DEV
+      ? {
+          projects: INITIAL_PROJECTS,
+          payments: INITIAL_PAYMENTS,
+          contacts: INITIAL_CONTACTS,
+          documents: INITIAL_DOCUMENTS,
+        }
+      : EMPTY_DB_DATA;
   }
 
   return {
@@ -193,8 +390,13 @@ export function getLocalDbData(): DbData {
 }
 
 export async function getDbData(): Promise<DbData> {
+  const result = await loadDbData();
+  return result.data;
+}
+
+export async function loadDbData(): Promise<DbLoadResult> {
   if (!isSupabaseConfigured || !supabase) {
-    return getLocalDbData();
+    return { data: getLocalDbData(), source: 'local' };
   }
 
   const {
@@ -202,7 +404,7 @@ export async function getDbData(): Promise<DbData> {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return getLocalDbData();
+    return { data: getLocalDbData(), source: 'local' };
   }
 
   try {
@@ -220,8 +422,8 @@ export async function getDbData(): Promise<DbData> {
       projectsResult.error || paymentsResult.error || contactsResult.error || documentsResult.error;
 
     if (error) {
-      console.error('Supabase load failed, falling back to local cache:', error);
-      return getLocalDbData();
+      console.error('Supabase load failed:', error);
+      return { data: getLocalDbData(), source: 'fallback', error };
     }
 
     const data: DbData = {
@@ -274,21 +476,11 @@ export async function getDbData(): Promise<DbData> {
         .filter(hasDocumentPayload),
     };
 
-    if (
-      data.projects.length === 0 &&
-      data.payments.length === 0 &&
-      data.contacts.length === 0 &&
-      data.documents.length === 0
-    ) {
-      await saveDbData(getLocalDbData());
-      return getLocalDbData();
-    }
-
     saveLocalDbData(data);
-    return data;
+    return { data, source: 'supabase' };
   } catch (error) {
-    console.error('Supabase load failed, falling back to local cache:', error);
-    return getLocalDbData();
+    console.error('Supabase load failed:', error);
+    return { data: getLocalDbData(), source: 'fallback', error };
   }
 }
 
@@ -298,6 +490,25 @@ function saveLocalDbData(data: DbData) {
     payments: [...data.payments],
     contacts: [...data.contacts],
     documents: [...data.documents],
+  };
+}
+
+export function cacheDbData(data: DbData) {
+  saveLocalDbData(data);
+}
+
+export function prepareDbDataForBackup(data: DbData): DbData {
+  return {
+    projects: data.projects,
+    contacts: data.contacts,
+    payments: data.payments.map((payment) => ({
+      ...payment,
+      billPhoto: payment.billPhotoStoragePath ? undefined : payment.billPhoto,
+    })),
+    documents: data.documents.map((document) => ({
+      ...document,
+      dataUrl: document.storagePath ? undefined : document.dataUrl,
+    })),
   };
 }
 
@@ -349,7 +560,7 @@ function toPaymentRow(payment: Payment, userId: string, orgId: string | null): P
     payment_mode: payment.paymentMode,
     remark: payment.remark,
     payment_date: payment.date,
-    bill_photo: payment.billPhoto || null,
+    bill_photo: payment.billPhotoStoragePath ? null : payment.billPhoto || null,
     bill_photo_storage_path: payment.billPhotoStoragePath || null,
   };
 }
@@ -377,6 +588,84 @@ async function throwOnSupabaseError(operation: PromiseLike<{ error: unknown }>) 
     throw result.error;
   }
 }
+
+async function getPersistenceContext() {
+  if (!isSupabaseConfigured || !supabase) {
+    return null;
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return null;
+  }
+
+  const activeOrg = await ensureActiveOrganization();
+  return {
+    userId: user.id,
+    orgId: activeOrg?.id || null,
+  };
+}
+
+async function persistSingleRow(
+  tableName: 'projects' | 'contacts' | 'payments' | 'documents',
+  row: ProjectRow | ContactRow | PaymentRow | DocumentRow,
+) {
+  if (!supabase) return true;
+
+  try {
+    await throwOnSupabaseError(supabase.from(tableName).upsert(row as never, { onConflict: 'id' }));
+    return true;
+  } catch (error) {
+    console.error(`Supabase ${tableName} row save failed:`, error);
+    return false;
+  }
+}
+
+async function deleteSingleRow(tableName: 'contacts' | 'payments' | 'documents', id: string) {
+  if (!supabase) return true;
+
+  const context = await getPersistenceContext();
+  if (!context) return true;
+
+  try {
+    await throwOnSupabaseError(supabase.from(tableName).delete().eq('user_id', context.userId).eq('id', id));
+    return true;
+  } catch (error) {
+    console.error(`Supabase ${tableName} row delete failed:`, error);
+    return false;
+  }
+}
+
+export async function persistProject(project: Project): Promise<boolean> {
+  const context = await getPersistenceContext();
+  if (!context) return true;
+  return persistSingleRow('projects', toProjectRow(project, context.userId, context.orgId));
+}
+
+export async function persistContact(contact: Contact): Promise<boolean> {
+  const context = await getPersistenceContext();
+  if (!context) return true;
+  return persistSingleRow('contacts', toContactRow(contact, context.userId, context.orgId));
+}
+
+export async function persistPayment(payment: Payment): Promise<boolean> {
+  const context = await getPersistenceContext();
+  if (!context) return true;
+  return persistSingleRow('payments', toPaymentRow(payment, context.userId, context.orgId));
+}
+
+export async function persistDocument(document: CloudDocument): Promise<boolean> {
+  const context = await getPersistenceContext();
+  if (!context) return true;
+  return persistSingleRow('documents', toDocumentRow(document, context.userId, context.orgId));
+}
+
+export const deleteContact = (id: string) => deleteSingleRow('contacts', id);
+export const deletePayment = (id: string) => deleteSingleRow('payments', id);
+export const deleteDocument = (id: string) => deleteSingleRow('documents', id);
 
 export async function saveDbData(data: DbData): Promise<boolean> {
   const previousLocalData = getLocalDbData();

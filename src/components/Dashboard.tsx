@@ -61,8 +61,8 @@ export default function Dashboard({
   const saveCustomOverheads = (newOverheads: Array<{ id: string; label: string; amount: number }>) => {
     setCustomOverheads(newOverheads);
     setSetting('cc_custom_overheads', JSON.stringify(newOverheads));
-    // Dispatch instant updating pipeline
     window.dispatchEvent(new Event('custom-db-updated'));
+    window.dispatchEvent(new Event('custom-settings-updated'));
   };
 
   const handleAddOverhead = (e: React.FormEvent) => {
@@ -106,15 +106,14 @@ export default function Dashboard({
 
   const [selectedFy, setSelectedFy] = useState<string>(() => getSetting('cc_selected_fy') || 'all');
 
-  // Extract all unique financial years based on payments data combined with some default ones
+  // Extract all unique financial years based on payment data and the current year.
   const availableFinancialYears = React.useMemo(() => {
     const yearsSet = new Set<number>();
-    
-    // Default standard years to ensure they are available in selectors
-    yearsSet.add(2024);
-    yearsSet.add(2025);
-    yearsSet.add(2026);
-    yearsSet.add(2027);
+    const currentYear = new Date().getFullYear();
+
+    yearsSet.add(currentYear - 1);
+    yearsSet.add(currentYear);
+    yearsSet.add(currentYear + 1);
 
     payments.forEach(p => {
       if (!p.date) return;
@@ -199,12 +198,13 @@ export default function Dashboard({
 
   // Export tax report
   const triggerCsvDownload = () => {
+    const companyName = getSetting('cc_company_name') || 'Workspace';
     const currentFyText = selectedFy === 'all' 
       ? 'All Time' 
       : `FY ${selectedFy}-${((parseInt(selectedFy, 10) + 1) % 100).toString().padStart(2, '0')} (1 April - 31 March)`;
 
     const defaultCsvRows = [
-      ['Catalyser Design - Automated Tax Report & Financial Statement'],
+      [`${companyName} - Tax Report & Financial Statement`],
       [`Date Generated: ${new Date().toLocaleDateString()}`],
       [`Time Period: ${currentFyText}`],
       [''],
@@ -253,7 +253,7 @@ export default function Dashboard({
     const fySuffix = selectedFy === 'all' 
       ? new Date().getFullYear().toString() 
       : `FY_${selectedFy}_${((parseInt(selectedFy, 10) + 1) % 100).toString().padStart(2, '0')}`;
-    link.setAttribute('download', `Construction_Catalyser_Tax_Report_${fySuffix}.csv`);
+    link.setAttribute('download', `Workspace_Tax_Report_${fySuffix}.csv`);
     
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
@@ -624,7 +624,7 @@ export default function Dashboard({
               {customOverheads.length === 0 && staffList.length === 0 ? (
                 <tr>
                   <td colSpan={3} className="py-6 text-center text-slate-400 italic">
-                    No custom overhead liabilities added. Add one below to adjust profitability margins!
+                    No custom overheads yet.
                   </td>
                 </tr>
               ) : (

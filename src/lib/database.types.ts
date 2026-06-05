@@ -16,7 +16,8 @@ export type Json =
   | Json[];
 
 type RowBase = {
-  updated_at?: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export interface Database {
@@ -30,8 +31,8 @@ export interface Database {
       };
       organizations: {
         Row: RowBase & { id: string; name: string; slug: string | null; created_by: string };
-        Insert: { id?: string; name: string; slug?: string | null; created_by: string };
-        Update: { name?: string; slug?: string | null };
+        Insert: { id?: string; name: string; slug?: string | null; created_by: string; created_at?: string };
+        Update: { name?: string; slug?: string | null; updated_at?: string };
         Relationships: [];
       };
       organization_memberships: {
@@ -44,8 +45,9 @@ export interface Database {
           organization_id: string;
           user_id: string;
           role: 'owner' | 'admin' | 'accountant' | 'project_manager' | 'viewer';
+          created_at?: string;
         };
-        Update: { role?: 'owner' | 'admin' | 'accountant' | 'project_manager' | 'viewer' };
+        Update: { role?: 'owner' | 'admin' | 'accountant' | 'project_manager' | 'viewer'; updated_at?: string };
         Relationships: [];
       };
       projects: {

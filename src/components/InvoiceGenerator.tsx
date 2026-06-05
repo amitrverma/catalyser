@@ -3,6 +3,7 @@ import { Project, Payment, Contact } from '../types';
 import Logo from './Logo';
 import { Printer, Mail, Send, CheckCircle2, CircleDollarSign, Plus, Trash2, Edit, Check, X, Eye, MessageSquare, Share2 } from 'lucide-react';
 import { getSetting } from '../lib/settingsStore';
+import { formatCurrency } from '../lib/formatter';
 
 interface InvoiceGeneratorProps {
   project: Project;
@@ -18,21 +19,21 @@ interface BillableItem {
 }
 
 export default function InvoiceGenerator({ project, payments, contacts }: InvoiceGeneratorProps) {
-  const [billableItems, setBillableItems] = useState<BillableItem[]>([
-    { id: 'item-1', description: 'Architectural Design Consultation & Blueprint Drafting', qty: 1, rate: 4500 },
-    { id: 'item-2', description: 'Concrete Slab Foundation Construction & Framing Check', qty: 1, rate: 12500 },
-    { id: 'item-3', description: 'Interior Custom Wooden Cabinetry Fabrication & Fitting', qty: 1, rate: 8200 },
-  ]);
+  const [billableItems, setBillableItems] = useState<BillableItem[]>([]);
 
   const [newItemDesc, setNewItemDesc] = useState('');
   const [newItemQty, setNewItemQty] = useState(1);
   const [newItemRate, setNewItemRate] = useState(0);
 
   const [invoiceType, setInvoiceType] = useState<'proforma' | 'tax'>('tax');
-  const [sgstRate, setSgstRate] = useState<number>(9); // SGST 9%
-  const [cgstRate, setCgstRate] = useState<number>(9); // CGST 9%
+  const [sgstRate, setSgstRate] = useState<number>(9);
+  const [cgstRate, setCgstRate] = useState<number>(9);
   const [terms, setTerms] = useState('Payment is due within 15 days of invoice date.');
-  const [invoiceNumber, setInvoiceNumber] = useState(`CC-2026-${project.id.split('-')[1] || '01'}`);
+  const [invoiceNumber, setInvoiceNumber] = useState(() => {
+    const year = new Date().getFullYear();
+    const suffix = project.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6).toUpperCase() || '000001';
+    return `INV-${year}-${suffix}`;
+  });
   const [sentStatus, setSentStatus] = useState<boolean>(false);
   const [whatsappStatus, setWhatsappStatus] = useState<boolean>(false);
   const [showPreview, setShowPreview] = useState<boolean>(false);
@@ -127,24 +128,24 @@ export default function InvoiceGenerator({ project, payments, contacts }: Invoic
   };
 
   const handleShareWhatsApp = () => {
-    const firmName = getSetting('cc_company_name') || 'Catalyser Design';
-    const totalDue = totalWithTax.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    const balanceDue = outstandingBalanceDue.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    const firmName = getSetting('cc_company_name') || 'Workspace';
+    const totalDue = formatCurrency(totalWithTax);
+    const balanceDue = formatCurrency(outstandingBalanceDue);
     
     const text = `*Invoice Reference:* ${invoiceNumber}
 *From:* ${firmName}
-*Job Site/Project:* ${project.name}
+*Project:* ${project.name}
 *Client:* ${project.clientName}
 
-Hello! Please find the summary of our invoice details below:
+Invoice summary:
 - *Document Type:* ${invoiceType === 'tax' ? 'Tax Invoice' : 'Proforma Invoice'}
-- *Total Billable:* ₹${totalDue}
-- *Deposits Received:* ₹${totalInflowsMatched.toLocaleString()}
-- *Outstanding Balance Due:* ₹${balanceDue}
+- *Total Billable:* ${totalDue}
+- *Deposits Received:* ${formatCurrency(totalInflowsMatched)}
+- *Outstanding Balance Due:* ${balanceDue}
 
-Thank you for your business. Please let us know if you need any adjustments or bank remittance support!`;
+Please review and confirm if any corrections are needed.`;
 
-    // Try fallback secure write to clipboard
+    // Copy the share text when clipboard access is available.
     try {
       if (navigator.clipboard) {
         navigator.clipboard.writeText(text);
@@ -198,7 +199,7 @@ Thank you for your business. Please let us know if you need any adjustments or b
             <div className="sm:col-span-3">
               <input
                 type="number"
-                placeholder="Rate (₹)"
+                placeholder="Rate"
                 value={newItemRate === 0 ? '' : newItemRate}
                 onChange={(e) => setNewItemRate(Number(e.target.value))}
                 className="w-full text-xs p-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none"
@@ -282,11 +283,11 @@ Thank you for your business. Please let us know if you need any adjustments or b
                       {item.description}
                     </span>
                     <span className="text-slate-400 mt-0.5 block font-mono">
-                      {item.qty} Unit(s) × ₹{item.rate.toLocaleString()} / Unit
+                      {item.qty} unit(s) x {formatCurrency(item.rate)} / unit
                     </span>
                   </div>
                   <div className="flex items-center gap-3.5 shrink-0">
-                    <span className="font-bold text-slate-800">₹{(item.qty * item.rate).toLocaleString()}</span>
+                    <span className="font-bold text-slate-800">{formatCurrency(item.qty * item.rate)}</span>
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => startEditing(item)}
@@ -480,11 +481,12 @@ Thank you for your business. Please let us know if you need any adjustments or b
 
           {/* Double Address Blocks */}
           {(() => {
-            const firmName = getSetting('cc_company_name') || 'Catalyser Design';
-            const firmAddress = getSetting('cc_company_address') || 'Unit number 809, 99 Avenue, Lullanagar, Pune - 411040';
-            const firmGstNum = getSetting('cc_company_gst') || '27AAECC4524C1Z9';
-            const firmEmail = getSetting('cc_company_email') || 'contact@catalyserdesign.com';
-            const firmPhone = getSetting('cc_company_phone') || '+91 98765 43210';
+            const firmName = getSetting('cc_company_name') || 'Your company';
+            const firmAddress = getSetting('cc_company_address') || '';
+            const firmGstNum = getSetting('cc_company_gst') || '';
+            const firmEmail = getSetting('cc_company_email') || '';
+            const firmPhone = getSetting('cc_company_phone') || '';
+            const firmContact = [firmEmail, firmPhone].filter(Boolean).join(' | ');
 
             // Find matching client GST from Directory Contacts
             const clientContact = contacts.find(
@@ -498,11 +500,13 @@ Thank you for your business. Please let us know if you need any adjustments or b
                 <div>
                   <span className="text-blue-600 font-bold uppercase tracking-wider block mb-1">Contractor Details</span>
                   <span className="font-extrabold text-slate-800 block">{firmName}</span>
-                  <span className="text-slate-400 block mt-0.5 whitespace-pre-wrap">{firmAddress}</span>
-                  <span className="text-blue-600 font-semibold block mt-1">{firmEmail} • {firmPhone}</span>
-                  <span className="text-slate-700 font-mono text-[10px] font-bold block mt-1.5 bg-slate-100/70 border border-slate-200 px-2 py-0.5 rounded-md w-max">
-                    GSTIN: {firmGstNum}
-                  </span>
+                  {firmAddress && <span className="text-slate-400 block mt-0.5 whitespace-pre-wrap">{firmAddress}</span>}
+                  {firmContact && <span className="text-blue-600 font-semibold block mt-1">{firmContact}</span>}
+                  {firmGstNum && (
+                    <span className="text-slate-700 font-mono text-[10px] font-bold block mt-1.5 bg-slate-100/70 border border-slate-200 px-2 py-0.5 rounded-md w-max">
+                      GSTIN: {firmGstNum}
+                    </span>
+                  )}
                 </div>
                 <div>
                   <span className="text-[#00509e] font-bold uppercase tracking-wider block mb-1">Bill To Client</span>
@@ -517,7 +521,7 @@ Thank you for your business. Please let us know if you need any adjustments or b
                     </span>
                   ) : (
                     <span className="text-slate-400 font-mono text-[9px] block mt-1.5 italic">
-                      No matching client GST in Directory
+                      No matching client GSTIN
                     </span>
                   )}
                 </div>
@@ -528,7 +532,7 @@ Thank you for your business. Please let us know if you need any adjustments or b
           {/* Table list */}
           <div className="text-xs">
             <div className="grid grid-cols-12 bg-slate-100 p-2 font-bold text-slate-700 text-left">
-              <div className="col-span-8">Product / Service Specification</div>
+              <div className="col-span-8">Product / Service</div>
               <div className="col-span-1 text-center">Qty</div>
               <div className="col-span-1 text-right">Rate</div>
               <div className="col-span-2 text-right">Sum</div>
@@ -539,8 +543,8 @@ Thank you for your business. Please let us know if you need any adjustments or b
                 <div key={item.id} className="grid grid-cols-12 p-2.5 text-left text-slate-600">
                   <div className="col-span-8 font-semibold text-slate-800">{item.description}</div>
                   <div className="col-span-1 text-center">{item.qty}</div>
-                  <div className="col-span-1 text-right">₹{item.rate.toLocaleString()}</div>
-                  <div className="col-span-2 text-right font-bold">₹{(item.qty * item.rate).toLocaleString()}</div>
+                  <div className="col-span-1 text-right">{formatCurrency(item.rate)}</div>
+                  <div className="col-span-2 text-right font-bold">{formatCurrency(item.qty * item.rate)}</div>
                 </div>
               ))}
             </div>
@@ -550,60 +554,81 @@ Thank you for your business. Please let us know if you need any adjustments or b
           <div className="flex justify-end pt-4">
             <div className="w-full sm:w-80 text-xs space-y-2 border-t pt-4">
               <div className="flex justify-between text-slate-600">
-                <span>Gross Direct Base Invoiced</span>
-                <span className="font-semibold text-slate-800">₹{totalInvoiced.toLocaleString()}</span>
+                <span>Subtotal</span>
+                <span className="font-semibold text-slate-800">{formatCurrency(totalInvoiced)}</span>
               </div>
               <div className="flex justify-between text-slate-600">
                 <span>SGST ({sgstRate}%)</span>
-                <span className="font-semibold text-slate-800 font-mono">₹{sgstAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span className="font-semibold text-slate-800 font-mono">{formatCurrency(sgstAmount)}</span>
               </div>
               <div className="flex justify-between text-slate-600">
                 <span>CGST ({cgstRate}%)</span>
-                <span className="font-semibold text-slate-800 font-mono">₹{cgstAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span className="font-semibold text-slate-800 font-mono">{formatCurrency(cgstAmount)}</span>
               </div>
               <div className="flex justify-between font-bold text-sm text-slate-800 pt-1 border-t">
-                <span>Total billable due</span>
-                <span>₹{totalWithTax.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                <span>Total</span>
+                <span>{formatCurrency(totalWithTax)}</span>
               </div>
               <div className="flex justify-between text-emerald-600 text-[11px] font-bold">
-                <span>Less: Client Deposits Received (-Inflow)</span>
-                <span>-₹{totalInflowsMatched.toLocaleString()}</span>
+                <span>Less: Receipts</span>
+                <span>-{formatCurrency(totalInflowsMatched)}</span>
               </div>
               <div className="flex justify-between font-bold text-base text-rose-600 bg-rose-50/80 p-2.5 rounded-lg border border-rose-100">
-                <span>Outstanding Balance Due</span>
-                <span>₹{outstandingBalanceDue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                <span>Balance Due</span>
+                <span>{formatCurrency(outstandingBalanceDue)}</span>
               </div>
             </div>
           </div>
 
           {/* Footer details including bank remittance credentials */}
           {(() => {
-            const bankAccName = getSetting('cc_bank_account_name') || 'Catalyser Design';
-            const bankName = getSetting('cc_bank_name') || 'HDFC Bank Ltd';
-            const bankAccNo = getSetting('cc_bank_account_number') || '50200012345678';
-            const bankAccType = getSetting('cc_bank_account_type') || 'Current';
-            const bankIfsc = getSetting('cc_bank_ifsc') || 'HDFC0001234';
+            const bankAccName = getSetting('cc_bank_account_name') || '';
+            const bankName = getSetting('cc_bank_name') || '';
+            const bankAccNo = getSetting('cc_bank_account_number') || '';
+            const bankAccType = getSetting('cc_bank_account_type') || '';
+            const bankIfsc = getSetting('cc_bank_ifsc') || '';
+            const hasBankDetails = Boolean(bankAccName || bankName || bankAccNo || bankAccType || bankIfsc);
 
             return (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left border-t pt-4">
                 <div className="bg-slate-50/75 p-4 rounded-xl border border-slate-150 text-[11px] leading-relaxed">
-                  <span className="font-bold text-blue-600 uppercase tracking-wider block mb-1.5 text-[9px]">Bank Remittance Coordinates</span>
-                  <div className="grid grid-cols-3 gap-y-1 text-slate-600 font-medium">
-                    <span className="text-slate-400 uppercase text-[8px] font-bold">Holder Name:</span>
-                    <span className="col-span-2 text-slate-800 font-bold">{bankAccName}</span>
-                    
-                    <span className="text-slate-400 uppercase text-[8px] font-bold">Bank Name:</span>
-                    <span className="col-span-2 text-slate-800 font-semibold">{bankName}</span>
-                    
-                    <span className="text-slate-400 uppercase text-[8px] font-bold">Account Num:</span>
-                    <span className="col-span-2 text-slate-800 font-mono font-bold tracking-wide">{bankAccNo}</span>
-                    
-                    <span className="text-slate-400 uppercase text-[8px] font-bold">Account Type:</span>
-                    <span className="col-span-2 text-slate-800 font-semibold">{bankAccType}</span>
-                    
-                    <span className="text-slate-400 uppercase text-[8px] font-bold">IFSC Code:</span>
-                    <span className="col-span-2 text-slate-800 font-mono font-extrabold text-blue-600 uppercase">{bankIfsc}</span>
-                  </div>
+                  <span className="font-bold text-blue-600 uppercase tracking-wider block mb-1.5 text-[9px]">Bank Details</span>
+                  {hasBankDetails ? (
+                    <div className="grid grid-cols-3 gap-y-1 text-slate-600 font-medium">
+                      {bankAccName && (
+                        <>
+                          <span className="text-slate-400 uppercase text-[8px] font-bold">Holder Name:</span>
+                          <span className="col-span-2 text-slate-800 font-bold">{bankAccName}</span>
+                        </>
+                      )}
+                      {bankName && (
+                        <>
+                          <span className="text-slate-400 uppercase text-[8px] font-bold">Bank Name:</span>
+                          <span className="col-span-2 text-slate-800 font-semibold">{bankName}</span>
+                        </>
+                      )}
+                      {bankAccNo && (
+                        <>
+                          <span className="text-slate-400 uppercase text-[8px] font-bold">Account No:</span>
+                          <span className="col-span-2 text-slate-800 font-mono font-bold tracking-wide">{bankAccNo}</span>
+                        </>
+                      )}
+                      {bankAccType && (
+                        <>
+                          <span className="text-slate-400 uppercase text-[8px] font-bold">Account Type:</span>
+                          <span className="col-span-2 text-slate-800 font-semibold">{bankAccType}</span>
+                        </>
+                      )}
+                      {bankIfsc && (
+                        <>
+                          <span className="text-slate-400 uppercase text-[8px] font-bold">IFSC Code:</span>
+                          <span className="col-span-2 text-slate-800 font-mono font-extrabold text-blue-600 uppercase">{bankIfsc}</span>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-slate-400">Add bank details in Settings.</span>
+                  )}
                 </div>
 
                 <div className="bg-slate-50/75 p-4 rounded-xl border border-slate-100 text-[10px] text-slate-400 leading-relaxed flex flex-col justify-between">
@@ -619,7 +644,7 @@ Thank you for your business. Please let us know if you need any adjustments or b
                       stamp = getSetting('custom_stamp_sign_base64');
                     }
                     const signature = getSetting('custom_sign_base64');
-                    const firmName = getSetting('cc_company_name') || 'Catalyser Design';
+                    const firmName = getSetting('cc_company_name') || 'Your company';
                     return (
                       <div className="flex flex-col items-end mt-4 pt-4 border-t border-slate-200/50">
                         <div className="text-right space-y-1">
@@ -674,7 +699,7 @@ Thank you for your business. Please let us know if you need any adjustments or b
                   })()}
 
                   <p className="mt-2 text-[9px] text-[#8fa0b5] italic">
-                    Secure digital backup document. Thank you for your partnership.
+                    Generated from the workspace invoice ledger.
                   </p>
                 </div>
               </div>

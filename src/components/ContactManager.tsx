@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Contact, ContactRole, Payment, Project } from '../types';
-import { formatDate } from '../lib/formatter';
+import { readContactImportFile } from '../lib/contactImport';
+import { formatCurrency, formatDate } from '../lib/formatter';
 import { CONTACT_ROLE_OPTIONS, getContactRoleConfig } from '../lib/roleLabels';
-import { Plus, User, Phone, Mail, Building2, UserCheck, Receipt, UserPlus, Edit2, Check, X } from 'lucide-react';
+import { Plus, User, Phone, Mail, Building2, UserCheck, Receipt, UserPlus, Edit2, Check, X, Upload } from 'lucide-react';
 
 type ContactInput = {
   name: string;
@@ -131,13 +132,52 @@ export default function ContactManager({
           onAddContact(contact.name, contact.role, contact.phone, contact.email, contact.company);
         });
       }
-      setImportStatus(`Imported and saved ${importedContacts.length} contact${importedContacts.length !== 1 ? 's' : ''} as Other.`);
+      setImportStatus(`Imported ${importedContacts.length} contact${importedContacts.length !== 1 ? 's' : ''}.`);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         setImportStatus('Contact import cancelled.');
         return;
       }
       setImportStatus('Unable to import contacts from this browser.');
+    }
+  };
+
+  const handleImportFromFile = async (file: File | undefined) => {
+    if (!file) return;
+    setImportStatus('Reading contact file...');
+
+    try {
+      const importedContacts = await readContactImportFile(file, 'other');
+      const newContacts = importedContacts.filter((contact) => {
+        const normalizedName = contact.name.trim().toLowerCase();
+        return !contacts.some((existing) => {
+          const sameName = existing.name.trim().toLowerCase() === normalizedName;
+          const samePhone = contact.phone && existing.phone === contact.phone;
+          const sameEmail = contact.email && existing.email.toLowerCase() === contact.email.toLowerCase();
+          return sameName || samePhone || sameEmail;
+        });
+      });
+
+      if (newContacts.length === 0) {
+        setImportStatus('No new contacts found in this file.');
+        return;
+      }
+
+      if (onAddContacts) {
+        const saved = await onAddContacts(newContacts);
+        if (saved === false) {
+          setImportStatus('Imported locally, but cloud sync failed. Please stay signed in and try again.');
+          return;
+        }
+      } else {
+        newContacts.forEach((contact) => {
+          onAddContact(contact.name, contact.role, contact.phone, contact.email, contact.company, contact.gstNumber, contact.address);
+        });
+      }
+
+      setImportStatus(`Imported ${newContacts.length} contact${newContacts.length !== 1 ? 's' : ''} from file.`);
+    } catch {
+      setImportStatus('Unable to import this file. Use a Google Contacts CSV export or .vcf file.');
     }
   };
 
@@ -231,6 +271,21 @@ export default function ContactManager({
           >
             <UserPlus size={14} /> Import Contacts
           </button>
+          <label
+            className="bg-white hover:bg-slate-50 text-slate-650 font-bold text-xs px-3 py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 whitespace-nowrap"
+            title="Import a Google Contacts CSV export or vCard file"
+          >
+            <Upload size={14} /> Import File
+            <input
+              type="file"
+              accept=".csv,.vcf,text/csv,text/vcard"
+              onChange={(event) => {
+                void handleImportFromFile(event.target.files?.[0]);
+                event.target.value = '';
+              }}
+              className="hidden"
+            />
+          </label>
         </div>
 
         {importStatus && (
@@ -265,7 +320,7 @@ export default function ContactManager({
       {showAddForm && (
         <form onSubmit={handleSubmit} className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex flex-col gap-2.5 animate-in slide-in-from-top-3 duration-150 text-left">
           <h4 className="text-xs font-extrabold text-slate-700 uppercase tracking-widest flex items-center gap-1">
-            <UserCheck size={14} className="text-blue-600" /> Register Directory Contact
+            <UserCheck size={14} className="text-blue-600" /> Add Contact
           </h4>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -334,7 +389,7 @@ export default function ContactManager({
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">GST Number</label>
               <input
                 type="text"
-                placeholder="e.g. 27AAECC4524C1Z9"
+                placeholder="GSTIN"
                 value={gstNumber}
                 onChange={(e) => setGstNumber(e.target.value)}
                 className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 uppercase font-mono font-semibold"
@@ -364,7 +419,7 @@ export default function ContactManager({
               type="submit"
               className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg cursor-pointer border-none"
             >
-              Add to Directory
+              Add Contact
             </button>
           </div>
         </form>
@@ -375,7 +430,7 @@ export default function ContactManager({
         <aside className="lg:col-span-5 xl:col-span-4">
           <div className="bg-white rounded-xl border border-slate-150 shadow-xs overflow-hidden">
             <div className="border-b border-slate-100 px-3 py-2 flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-800">Directory</span>
+              <span className="text-xs font-bold text-slate-800">Contacts</span>
               <span className="text-[11px] text-slate-400">{filteredContacts.length} shown</span>
             </div>
             <div className="max-h-[calc(100vh-245px)] min-h-[260px] overflow-y-auto scrollbar-hidden divide-y divide-slate-100">
@@ -389,28 +444,57 @@ export default function ContactManager({
                   ).length;
                   const isSelected = selectedContact?.id === c.id;
                   return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => setSelectedContactId(c.id)}
-                      className={`w-full border-none px-3 py-2.5 text-left transition cursor-pointer ${
-                        isSelected ? 'bg-blue-50' : 'bg-white hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <span className="block truncate text-sm font-bold text-slate-900">{c.name}</span>
-                          <span className="mt-0.5 block truncate text-xs text-slate-500">{c.company || c.email || c.phone || 'No company details'}</span>
+                    <div key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedContactId(c.id)}
+                        className={`w-full border-none px-3 py-2.5 text-left transition cursor-pointer ${
+                          isSelected ? 'bg-blue-50' : 'bg-white hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <span className="block truncate text-sm font-bold text-slate-900">{c.name}</span>
+                            <span className="mt-0.5 block truncate text-xs text-slate-500">{c.company || c.email || c.phone || 'No company details'}</span>
+                          </div>
+                          <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold ${roleConfig.badgeClass}`}>
+                            {roleConfig.label}
+                          </span>
                         </div>
-                        <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold ${roleConfig.badgeClass}`}>
-                          {roleConfig.label}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-400">
-                        <span>{partyPaymentsCount} transaction{partyPaymentsCount !== 1 ? 's' : ''}</span>
-                        <span>{c.phone || c.email ? 'Contactable' : 'Incomplete'}</span>
-                      </div>
-                    </button>
+                        <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-400">
+                          <span>{partyPaymentsCount} transaction{partyPaymentsCount !== 1 ? 's' : ''}</span>
+                          <span>{c.phone || c.email ? 'Contactable' : 'Incomplete'}</span>
+                        </div>
+                      </button>
+                      {isSelected && (
+                        <div className="lg:hidden border-t border-blue-100 bg-blue-50/60 px-3 py-2.5 text-xs text-slate-700">
+                          <div className="grid grid-cols-1 gap-1.5">
+                            <span className="font-bold text-slate-900">{c.company || 'No company added'}</span>
+                            <span>{c.phone || 'No phone added'}</span>
+                            <span className="break-all">{c.email || 'No email added'}</span>
+                            <span>{c.address || 'No address added'}</span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {onUpdateContact && (
+                              <button
+                                type="button"
+                                onClick={() => startEditingContact(c)}
+                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-600"
+                              >
+                                Edit
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedContactForLedger(c)}
+                              className="rounded-lg border border-blue-100 bg-white px-2.5 py-1.5 text-[11px] font-bold text-[#00509e]"
+                            >
+                              View ledger
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   );
                 })
               )}
@@ -418,7 +502,7 @@ export default function ContactManager({
           </div>
         </aside>
 
-        <section className="lg:col-span-7 xl:col-span-8">
+        <section className="hidden lg:block lg:col-span-7 xl:col-span-8">
           {selectedContact ? (() => {
             const c = selectedContact;
           const roleConfig = getContactRoleConfig(c.role);
@@ -618,11 +702,11 @@ export default function ContactManager({
                     </div>
                     <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-2">
                       <span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-700">Received</span>
-                      <span className="mt-0.5 block truncate text-sm font-black text-emerald-700">₹{totalIn.toLocaleString()}</span>
+                      <span className="mt-0.5 block truncate text-sm font-black text-emerald-700">{formatCurrency(totalIn)}</span>
                     </div>
                     <div className="rounded-lg border border-rose-100 bg-rose-50 p-2">
                       <span className="block text-[10px] font-bold uppercase tracking-wide text-rose-700">Paid</span>
-                      <span className="mt-0.5 block truncate text-sm font-black text-rose-700">₹{totalOut.toLocaleString()}</span>
+                      <span className="mt-0.5 block truncate text-sm font-black text-rose-700">{formatCurrency(totalOut)}</span>
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-150 overflow-hidden">
@@ -643,7 +727,7 @@ export default function ContactManager({
                                 <span className="block truncate text-slate-400">{payment.remark || 'No remark'}</span>
                               </div>
                               <div className={`col-span-4 text-right font-mono font-black ${payment.type === 'in' ? 'text-emerald-700' : 'text-rose-600'}`}>
-                                {payment.type === 'in' ? '+' : '-'}₹{payment.amount.toLocaleString()}
+                                {payment.type === 'in' ? '+' : '-'}{formatCurrency(payment.amount)}
                               </div>
                             </div>
                           );
@@ -683,7 +767,7 @@ export default function ContactManager({
                 </h3>
                 <div className="flex flex-col gap-0.5 mt-1">
                   <span className="text-[11px] text-slate-450 capitalize block font-semibold">
-                    {selectedContactForLedger.company ? `${selectedContactForLedger.company} • ` : ''}{selectedContactForLedger.role} account profile
+                    {selectedContactForLedger.company ? `${selectedContactForLedger.company} / ` : ''}{selectedContactForLedger.role} account
                   </span>
                   {(selectedContactForLedger.gstNumber || selectedContactForLedger.address) && (
                     <div className="flex flex-wrap items-center gap-2 mt-1 text-[9.5px]">
@@ -694,7 +778,7 @@ export default function ContactManager({
                       )}
                       {selectedContactForLedger.address && (
                         <span className="text-slate-500 bg-slate-50 border border-slate-150 px-1.5 py-0.5 rounded font-medium max-w-sm truncate" title={selectedContactForLedger.address}>
-                          📍 {selectedContactForLedger.address}
+                          {selectedContactForLedger.address}
                         </span>
                       )}
                     </div>
@@ -731,16 +815,16 @@ export default function ContactManager({
                   <div className="grid grid-cols-3 gap-3">
                     <div className="bg-emerald-50/50 border border-emerald-100 p-3 rounded-xl text-left">
                       <span className="text-[9px] uppercase font-bold text-emerald-700 font-mono tracking-wider">Deposited (Credit)</span>
-                      <span className="text-base font-black text-emerald-600 block mt-0.5">₹{totalIn.toLocaleString()}</span>
+                      <span className="text-base font-black text-emerald-600 block mt-0.5">{formatCurrency(totalIn)}</span>
                     </div>
                     <div className="bg-rose-50/50 border border-rose-100 p-3 rounded-xl text-left">
                       <span className="text-[9px] uppercase font-bold text-rose-700 font-mono tracking-wider">Withdrawn (Debit)</span>
-                      <span className="text-base font-black text-rose-500 block mt-0.5">₹{totalOut.toLocaleString()}</span>
+                      <span className="text-base font-black text-rose-500 block mt-0.5">{formatCurrency(totalOut)}</span>
                     </div>
                     <div className={`${balance >= 0 ? 'bg-blue-50/50 border-blue-100 text-blue-700' : 'bg-rose-50/50 border-rose-100 text-rose-700'} border p-3 rounded-xl text-left`}>
                       <span className="text-[9px] uppercase font-bold text-slate-400 font-mono tracking-wider">Relative Standing</span>
                       <span className="text-base font-black block mt-0.5">
-                        {balance >= 0 ? '+' : ''}₹{balance.toLocaleString()}
+                        {balance >= 0 ? '+' : ''}{formatCurrency(balance)}
                       </span>
                     </div>
                   </div>
@@ -774,7 +858,7 @@ export default function ContactManager({
                                 </td>
                                 <td className="px-3 py-2.5 text-slate-550 max-w-[180px] truncate">{p.remark || 'N/A'}</td>
                                 <td className={`px-3 py-2.5 text-right font-black font-mono whitespace-nowrap ${p.type === 'in' ? 'text-emerald-700' : 'text-rose-600'}`}>
-                                  {p.type === 'in' ? '+' : '-'}₹{p.amount.toLocaleString()}
+                                  {p.type === 'in' ? '+' : '-'}{formatCurrency(p.amount)}
                                 </td>
                               </tr>
                             );

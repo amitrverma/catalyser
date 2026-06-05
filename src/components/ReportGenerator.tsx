@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Project, Payment, PaymentMode, PaymentType } from '../types';
-import { formatDate } from '../lib/formatter';
+import { formatCurrency, formatDate } from '../lib/formatter';
 import Logo from './Logo';
 import { Printer, Download, Eye, Table, Filter, Calendar, IndianRupee, Layers, Users, RefreshCw } from 'lucide-react';
+import { getSetting } from '../lib/settingsStore';
 
 interface ReportGeneratorProps {
   projects: Project[];
@@ -16,15 +17,14 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
   const [paymentModeFilter, setPaymentModeFilter] = useState<string>('all');
   const [selectedFy, setSelectedFy] = useState<string>('all');
 
-  // Extract all unique financial years based on payments data combined with some default ones
+  // Extract all unique financial years based on payment data and the current year.
   const availableFinancialYears = React.useMemo(() => {
     const yearsSet = new Set<number>();
-    
-    // Default standard years to ensure they are available in selectors
-    yearsSet.add(2024);
-    yearsSet.add(2025);
-    yearsSet.add(2026);
-    yearsSet.add(2027);
+    const currentYear = new Date().getFullYear();
+
+    yearsSet.add(currentYear - 1);
+    yearsSet.add(currentYear);
+    yearsSet.add(currentYear + 1);
 
     payments.forEach(p => {
       if (!p.date) return;
@@ -43,7 +43,7 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
     return Array.from(yearsSet).sort((a, b) => b - a); // Sort descending
   }, [payments]);
 
-  // Extract all unique parties depending on selected project, so the list stays highly consistent!
+  // Extract parties for the selected project scope.
   const relevantPaymentsForParties = selectedProjectId === 'all'
     ? payments
     : payments.filter((p) => p.projectId === selectedProjectId);
@@ -97,8 +97,9 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
 
   // Excel Format / CSV Download trigger
   const handleDownloadExcel = () => {
+    const companyName = getSetting('cc_company_name') || 'Workspace';
     // Generate file metadata headers and column schema
-    const headers = ['Log Date', 'Remark/Description', 'Associated Project', 'Associated Party', 'Party Role', 'Payment Mode', 'Transaction Type', 'Inflow (₹)', 'Outflow (₹)', 'Net Balance Impact (₹)'];
+    const headers = ['Date', 'Remark', 'Project', 'Party', 'Party Role', 'Payment Mode', 'Type', 'Inflow', 'Outflow', 'Net Balance Impact'];
     
     const rows = sortedPayments.map((p) => {
       const proj = projects.find((pr) => pr.id === p.projectId);
@@ -119,13 +120,13 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
     });
 
     const csvContent = [
-      ['Catalyser Design Ledger Statement'],
+      [`${companyName} Ledger Statement`],
       [`Generated At: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`],
       [`Scope: Project(${selectedProjectId === 'all' ? 'All' : projects.find(pr => pr.id === selectedProjectId)?.name}), Party(${effectiveParty === 'all' ? 'All' : effectiveParty})`],
       ['SUMMARY STATS:'],
-      [`Total Cash Inflow,₹${totalInflow}`],
-      [`Total Cash Outflow,₹${totalOutflow}`],
-      [`Relative Cash Margin,₹${netStatementBalance}`],
+      [`Total Cash Inflow,${totalInflow}`],
+      [`Total Cash Outflow,${totalOutflow}`],
+      [`Net Balance,${netStatementBalance}`],
       [''],
       headers.join(','),
       ...rows.map((r) => r.join(','))
@@ -135,14 +136,14 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `Catalyser_Ledger_Report_${new Date().toISOString().substring(0, 10)}.csv`);
+    link.setAttribute('download', `Workspace_Ledger_Report_${new Date().toISOString().substring(0, 10)}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const activeProjectName = selectedProjectId === 'all' ? 'All Portfolios' : projects.find((p) => p.id === selectedProjectId)?.name || 'Specified';
+  const activeProjectName = selectedProjectId === 'all' ? 'All Projects' : projects.find((p) => p.id === selectedProjectId)?.name || 'Specified';
 
   return (
     <div className="space-y-6 text-left font-sans" id="ledger-reporting-hub">
@@ -151,9 +152,9 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
           <div>
             <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
-              <Filter size={18} className="text-blue-600" /> Dynamic Ledger Reporting Studio
+              <Filter size={18} className="text-blue-600" /> Ledger Reports
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">Filter cash flows by client portfolios, vendors, and suppliers to generate professional print sheets.</p>
+            <p className="text-xs text-slate-400 mt-0.5">Filter project payments by party, type, mode, and fiscal period.</p>
           </div>
           <div className="flex gap-2 shrink-0">
             <button
@@ -177,14 +178,14 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
           {/* Project Dropdown Filter */}
           <div className="space-y-1">
             <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider flex items-center gap-1">
-              <Layers size={11} className="text-slate-400" /> Target Project Portfolio
+              <Layers size={11} className="text-slate-400" /> Project
             </label>
             <select
               value={selectedProjectId}
               onChange={(e) => setSelectedProjectId(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none font-medium focus:ring-1 focus:ring-blue-500"
             >
-              <option value="all">📁 All Active Projects ({projects.length})</option>
+              <option value="all">All Projects ({projects.length})</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -196,14 +197,14 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
           {/* Party Dropdown Filter */}
           <div className="space-y-1">
             <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider flex items-center gap-1">
-              <Users size={11} className="text-slate-400" /> Account Party / Contact
+              <Users size={11} className="text-slate-400" /> Party
             </label>
             <select
               value={effectiveParty}
               onChange={(e) => setSelectedParty(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none font-medium focus:ring-1 focus:ring-blue-500"
             >
-              <option value="all">👥 All parties ({allUniqueParties.length})</option>
+              <option value="all">All parties ({allUniqueParties.length})</option>
               {allUniqueParties.map((pty) => (
                 <option key={pty} value={pty}>
                   {pty}
@@ -222,9 +223,9 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
               onChange={(e) => setTypeFilter(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none font-medium focus:ring-1 focus:ring-blue-500"
             >
-              <option value="all">💸 All Transactions</option>
-              <option value="in">💰 Cash Inflow (Deposits)</option>
-              <option value="out">🧾 Cash Outflow (Expenses)</option>
+              <option value="all">All Transactions</option>
+              <option value="in">Inflow</option>
+              <option value="out">Outflow</option>
             </select>
           </div>
 
@@ -238,12 +239,12 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
               onChange={(e) => setPaymentModeFilter(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none font-medium focus:ring-1 focus:ring-blue-500"
             >
-              <option value="all">🏛️ All Modes</option>
-              <option value="bank_transfer">🏛️ Bank Transfer / ACH</option>
-              <option value="cash">💵 Hard Cash</option>
-              <option value="upi">📱 UPI Wallet</option>
-              <option value="cheque">✍️ Bank Cheque Draw</option>
-              <option value="card">💳 Debit/Credit Card</option>
+              <option value="all">All Modes</option>
+              <option value="bank_transfer">Bank Transfer</option>
+              <option value="cash">Cash</option>
+              <option value="upi">UPI</option>
+              <option value="cheque">Cheque</option>
+              <option value="card">Card</option>
             </select>
           </div>
 
@@ -257,10 +258,10 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
               onChange={(e) => setSelectedFy(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none font-medium focus:ring-1 focus:ring-blue-500"
             >
-              <option value="all">📅 All Time (Aggregate)</option>
+              <option value="all">All Time</option>
               {availableFinancialYears.map((startYr) => (
                 <option key={startYr} value={startYr.toString()}>
-                  📅 FY {startYr}-{((startYr + 1) % 100).toString().padStart(2, '0')} (1 Apr - 31 Mar)
+                  FY {startYr}-{((startYr + 1) % 100).toString().padStart(2, '0')} (1 Apr - 31 Mar)
                 </option>
               ))}
             </select>
@@ -285,19 +286,17 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
             onClick={handleDownloadExcel}
             className="bg-[#00509e] hover:bg-[#007acc] text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition duration-150"
           >
-            <Download size={14} /> Download Excel (CSV)
+            <Download size={14} /> Export CSV
           </button>
         </div>
       </div>
 
-      {/* Sandbox iframe warning / instruction label */}
+      {/* Print instruction label */}
       <div className="bg-slate-905 border border-slate-800 p-4 rounded-xl text-left print:hidden shadow-xs space-y-1 bg-slate-900">
-        <span className="text-[9px] uppercase font-bold text-blue-400 tracking-widest font-mono block">Document Workstation Tip</span>
+        <span className="text-[9px] uppercase font-bold text-blue-400 tracking-widest font-mono block">Print Tip</span>
         <div className="text-[11px] text-amber-200/90 font-medium flex gap-2 items-start leading-relaxed">
-          <span className="text-xs shrink-0">💡</span>
           <p>
-            <b>Saving Statement as PDF:</b> When clicking <b>"Print / Save PDF"</b>, wait for your browser's print dialog to load, then select <b>"Save as PDF"</b> under the target destination. 
-            Due to secure iframe sandboxing in web previews, if your printer dialog does not trigger, please click <b>"Open in New Tab"</b> at the top-right of your preview screen to export seamlessly as a native PDF document!
+            Use <b>Print / Save PDF</b>, then choose <b>Save as PDF</b> in the browser print dialog.
           </p>
         </div>
       </div>
@@ -313,7 +312,7 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
               <span>Date Generated: <span className="font-semibold text-slate-600">{new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span></span>
               <span className="block">Scope: <span className="font-semibold text-slate-605">{activeProjectName}</span></span>
               <span className="block">Fiscal Period: <span className="font-semibold text-slate-605">{selectedFy === 'all' ? 'All Time (Aggregate)' : `FY ${selectedFy}-${((parseInt(selectedFy, 10) + 1) % 100).toString().padStart(2, '0')} (1 Apr - 31 Mar)`}</span></span>
-              {effectiveParty !== 'all' && <span className="block">Party Portfolio: <span className="font-semibold text-slate-605">{effectiveParty}</span></span>}
+              {effectiveParty !== 'all' && <span className="block">Party: <span className="font-semibold text-slate-605">{effectiveParty}</span></span>}
             </div>
           </div>
         </div>
@@ -346,16 +345,16 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-slate-50 border border-slate-150 p-4 rounded-xl text-left">
             <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Deposited (Cash In)</span>
-            <span className="text-base sm:text-xl font-black text-emerald-600 block mt-1">₹{totalInflow.toLocaleString()}</span>
+            <span className="text-base sm:text-xl font-black text-emerald-600 block mt-1">{formatCurrency(totalInflow)}</span>
           </div>
           <div className="bg-slate-50 border border-slate-150 p-4 rounded-xl text-left">
             <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Withdrawn (Cash Out)</span>
-            <span className="text-base sm:text-xl font-black text-rose-500 block mt-1">₹{totalOutflow.toLocaleString()}</span>
+            <span className="text-base sm:text-xl font-black text-rose-500 block mt-1">{formatCurrency(totalOutflow)}</span>
           </div>
           <div className="bg-blue-500/10 border border-blue-250 p-4 rounded-xl text-left">
             <span className="text-[10px] font-bold uppercase text-blue-600 tracking-wider">Statement Relative Net</span>
             <span className={`text-base sm:text-xl font-black block mt-1 ${netStatementBalance >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-              {netStatementBalance >= 0 ? '+' : ''}₹{netStatementBalance.toLocaleString()}
+              {netStatementBalance >= 0 ? '+' : ''}{formatCurrency(netStatementBalance)}
             </span>
           </div>
         </div>
@@ -397,10 +396,10 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap capitalize font-medium">{p.paymentMode.replace('_', ' ')}</td>
                       <td className="px-4 py-3.5 text-right font-bold text-rose-500 whitespace-nowrap font-mono">
-                        {p.type === 'out' ? `-₹${p.amount.toLocaleString()}` : '—'}
+                        {p.type === 'out' ? `-${formatCurrency(p.amount)}` : '-'}
                       </td>
                       <td className="px-4 py-3.5 text-right font-bold text-emerald-600 whitespace-nowrap font-mono">
-                        {p.type === 'in' ? `+₹${p.amount.toLocaleString()}` : '—'}
+                        {p.type === 'in' ? `+${formatCurrency(p.amount)}` : '-'}
                       </td>
                     </tr>
                   );
@@ -414,7 +413,7 @@ export default function ReportGenerator({ projects, payments }: ReportGeneratorP
         <div className="border-t border-slate-100 pt-6 text-left flex justify-between items-center text-[10px] text-slate-400">
           <div>
             <span className="font-extrabold text-slate-500 uppercase tracking-widest block">CATALYSER DESIGN</span>
-            <span>Digitally audited financial backup statement ledger. Synchronised safely.</span>
+            <span>Financial statement generated from workspace ledger records.</span>
           </div>
           <div className="text-right">
             <span>Security Digest: SHA-256 Verified</span>

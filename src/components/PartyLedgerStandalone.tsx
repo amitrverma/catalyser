@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Project, Payment, Contact, PaymentMode, PaymentType, DbData, PartyRole } from '../types';
-import { getDbData, saveDbData } from '../lib/db';
-import { formatDate } from '../lib/formatter';
+import { cacheDbData, deletePayment, getDbData, persistPayment } from '../lib/db';
+import { uploadPaymentBillDataUrl, validateBillImageFile } from '../lib/fileStorage';
+import { formatCurrency, formatDate } from '../lib/formatter';
 import { PARTY_ROLE_OPTIONS } from '../lib/roleLabels';
 import { Receipt, Calendar, Edit2, Trash2, Camera, Check, ExternalLink, ArrowLeftRight, Landmark, Tag } from 'lucide-react';
 
@@ -25,6 +26,48 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState('');
+
+  const readBillPhotoFile = (file: File) => {
+    const error = validateBillImageFile(file);
+    if (error) {
+      setSaveError(error);
+      return;
+    }
+
+    setSaveError('');
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setEditBillPhoto(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const syncPaymentBillPhoto = async (payment: Payment) => {
+    if (!payment.billPhoto?.startsWith('data:')) return;
+
+    try {
+      const storagePath = await uploadPaymentBillDataUrl(payment.id, payment.billPhoto);
+      if (!storagePath) return;
+
+      setDb((currentDb) => {
+        if (!currentDb) return null;
+        const updatedPayments = currentDb.payments.map((item) =>
+          item.id === payment.id ? { ...item, billPhotoStoragePath: storagePath } : item,
+        );
+        const updatedDb = { ...currentDb, payments: updatedPayments };
+        cacheDbData(updatedDb);
+        const persistedPayment = updatedPayments.find((item) => item.id === payment.id);
+        if (persistedPayment) {
+          void persistPayment({ ...persistedPayment, billPhoto: undefined, billPhotoStoragePath: storagePath });
+        }
+        return updatedDb;
+      });
+    } catch (error) {
+      console.error('Bill photo upload failed:', error);
+      setSaveError('The transaction was saved, but the bill photo could not be uploaded.');
+    }
+  };
 
   // Load database on mount
   useEffect(() => {
@@ -49,7 +92,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-8 text-slate-400">
         <span className="text-xs font-mono tracking-widest animate-pulse">
-          LOADING SECURE PARTY STATEMENT...
+          Loading party ledger...
         </span>
       </div>
     );
@@ -106,6 +149,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
           date: editDate,
           projectId: editProjectId,
           billPhoto: editBillPhoto || undefined,
+          billPhotoStoragePath: editBillPhoto?.startsWith('data:') ? undefined : editingPayment.billPhotoStoragePath,
         };
       }
       return p;
@@ -113,7 +157,12 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
 
     const updatedDb = { ...db, payments: updatedPayments };
     setDb(updatedDb);
-    void saveDbData(updatedDb);
+    cacheDbData(updatedDb);
+    const savedPayment = updatedPayments.find((payment) => payment.id === editingPayment.id);
+    if (savedPayment) {
+      void persistPayment(savedPayment);
+      void syncPaymentBillPhoto(savedPayment);
+    }
     setEditingPayment(null);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
@@ -126,7 +175,8 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
     const updatedPayments = db.payments.filter((p) => p.id !== id);
     const updatedDb = { ...db, payments: updatedPayments };
     setDb(updatedDb);
-    void saveDbData(updatedDb);
+    cacheDbData(updatedDb);
+    void deletePayment(id);
     setDeleteConfirmId(null);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
@@ -147,14 +197,14 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
             <div>
               <h1 className="text-lg font-black tracking-tight leading-tight uppercase">Party Accounts</h1>
               <span className="text-[10px] text-slate-400 font-mono tracking-widest block uppercase mt-0.5">
-                SECURE TRANSACTION RECORD STATEMENT
+                Transaction statement
               </span>
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs font-semibold">
             <span className="bg-emerald-600/10 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg flex items-center gap-1">
               <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-              Synchronized Multi-Tab Database
+              Synced workspace
             </span>
           </div>
         </div>
@@ -166,7 +216,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
         {saveSuccess && (
           <div className="bg-emerald-5 border border-emerald-200 p-4 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-200 shadow-sm">
             <Check size={16} className="text-emerald-600 shrink-0" />
-            Ledger adjustments saved successfully! Changes are instantly synced with all active construction and billing tabs.
+            Ledger changes saved.
           </div>
         )}
 
@@ -179,7 +229,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
               </span>
               {contactProfile?.company && (
                 <span className="text-[10px] text-slate-500 font-semibold bg-slate-100 px-2.5 py-0.5 rounded-full">
-                  🏢 {contactProfile.company}
+                  {contactProfile.company}
                 </span>
               )}
             </div>
@@ -188,16 +238,16 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
             {/* Display Contact details from directory if associated */}
             <div className="text-xs text-slate-500 space-y-1 pt-1">
               {contactProfile?.phone && (
-                <p>• Mobile Phone Number: <span className="text-slate-700 font-bold">{contactProfile.phone}</span></p>
+                <p>Phone: <span className="text-slate-700 font-bold">{contactProfile.phone}</span></p>
               )}
               {contactProfile?.email && (
-                <p>• Registered Email: <span className="text-slate-700 font-bold">{contactProfile.email}</span></p>
+                <p>Email: <span className="text-slate-700 font-bold">{contactProfile.email}</span></p>
               )}
               {contactProfile?.gstNumber && (
-                <p>• Verified GSTIN: <span className="text-slate-705 font-bold font-mono text-blue-650 bg-blue-50/50 px-1.5 py-0.5 rounded text-[10px] border border-blue-100">{contactProfile.gstNumber}</span></p>
+                <p>GSTIN: <span className="text-slate-705 font-bold font-mono text-blue-650 bg-blue-50/50 px-1.5 py-0.5 rounded text-[10px] border border-blue-100">{contactProfile.gstNumber}</span></p>
               )}
               {contactProfile?.address && (
-                <p>• Business address: <span className="text-slate-700 font-medium">{contactProfile.address}</span></p>
+                <p>Address: <span className="text-slate-700 font-medium">{contactProfile.address}</span></p>
               )}
             </div>
           </div>
@@ -206,13 +256,13 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 w-full md:w-auto shrink-0 md:max-w-md">
             <div className="bg-emerald-50/40 border border-emerald-100 p-3 rounded-xl text-left">
               <span className="text-[9px] uppercase font-bold text-emerald-700 font-mono tracking-wider block">Deposited (Credit / In)</span>
-              <span className="text-base font-black text-emerald-600 block mt-0.5">₹{totalIn.toLocaleString()}</span>
+              <span className="text-base font-black text-emerald-600 block mt-0.5">{formatCurrency(totalIn)}</span>
               <span className="text-[9.5px] text-slate-400 block mt-0.5 font-medium">Funds Cleared</span>
             </div>
             
             <div className="bg-rose-50/40 border border-rose-100 p-3 rounded-xl text-left">
               <span className="text-[9px] uppercase font-bold text-rose-700 font-mono tracking-wider block">Withdrawn (Debit / Out)</span>
-              <span className="text-base font-black text-rose-500 block mt-0.5">₹{totalOut.toLocaleString()}</span>
+              <span className="text-base font-black text-rose-500 block mt-0.5">{formatCurrency(totalOut)}</span>
               <span className="text-[9.5px] text-slate-400 block mt-0.5 font-medium">Material / Services Payouts</span>
             </div>
 
@@ -220,11 +270,11 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
               <div>
                 <span className="text-[9px] uppercase font-bold font-mono tracking-wider text-slate-400 block">Relative Standing</span>
                 <span className="text-base font-black block mt-0.5">
-                  {balance >= 0 ? '+' : ''}₹{balance.toLocaleString()}
+                  {balance >= 0 ? '+' : ''}{formatCurrency(balance)}
                 </span>
               </div>
               <span className="text-[9.5px] text-slate-400 block mt-1 font-medium font-mono truncate">
-                {balance >= 0 ? 'Clear Retainer' : 'Balance Deficit'}
+                {balance >= 0 ? 'Net receivable' : 'Net payable'}
               </span>
             </div>
           </div>
@@ -238,7 +288,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                 <Receipt size={16} className="text-blue-600" /> Complete Transaction Logs Ledger
               </h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Lists all recorded payments associated with {partyName} under different construction portfolios. Take corrective actions by clicking Edit.
+                Payments recorded against {partyName}.
               </p>
             </div>
           </div>
@@ -254,13 +304,13 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
               <table className="w-full text-xs divide-y divide-slate-150 text-left border-collapse table-auto">
                 <thead className="bg-slate-50 font-bold uppercase tracking-wider text-[9.5px] text-slate-500 sticky top-0">
                   <tr>
-                    <th className="px-4 py-3">Log Date</th>
+                    <th className="px-4 py-3">Date</th>
                     <th className="px-4 py-3">Associated Project</th>
-                    <th className="px-4 py-3">Remark / Purpose</th>
+                    <th className="px-4 py-3">Remark</th>
                     <th className="px-4 py-3">Payment Mode</th>
                     <th className="px-4 py-3 text-right">Debit (Outflow)</th>
                     <th className="px-4 py-3 text-right">Credit (Inflow)</th>
-                    <th className="px-4 py-3 text-center">Correct Details</th>
+                    <th className="px-4 py-3 text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white text-slate-650">
@@ -276,9 +326,9 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                         </td>
                         <td className="px-4 py-3 text-slate-600 truncate max-w-[200px]" title={p.remark}>
                           <div className="flex items-center gap-1.5">
-                            {p.billPhoto && (
+                            {(p.billPhoto || p.billPhotoStoragePath) && (
                               <span className="inline-block px-1.5 py-0.5 bg-blue-50 border border-blue-100 rounded text-[9px] text-blue-600 font-bold font-mono">
-                                PHOTO
+                                BILL
                               </span>
                             )}
                             <span>{p.remark || 'N/A'}</span>
@@ -288,10 +338,10 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                           {p.paymentMode.replace('_', ' ')}
                         </td>
                         <td className="px-4 py-3 text-right font-bold text-rose-550 whitespace-nowrap font-mono">
-                          {p.type === 'out' ? `-₹${p.amount.toLocaleString()}` : '—'}
+                          {p.type === 'out' ? `-${formatCurrency(p.amount)}` : '-'}
                         </td>
                         <td className="px-4 py-3 text-right font-bold text-emerald-650 whitespace-nowrap font-mono">
-                          {p.type === 'in' ? `+₹${p.amount.toLocaleString()}` : '—'}
+                          {p.type === 'in' ? `+${formatCurrency(p.amount)}` : '-'}
                         </td>
                         <td className="px-4 py-3 text-center whitespace-nowrap">
                           <button
@@ -339,7 +389,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                       : 'text-slate-500 hover:bg-slate-100'
                   }`}
                 >
-                  📉 Outflow (Expense Debit)
+                  Outflow
                 </button>
                 <button
                   type="button"
@@ -350,7 +400,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                       : 'text-slate-500 hover:bg-slate-100'
                   }`}
                 >
-                  📈 Inflow (Deposit Credit)
+                  Inflow
                 </button>
               </div>
 
@@ -367,11 +417,11 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">Amount (₹)</label>
+                  <label className="text-[10px] uppercase font-bold text-slate-400">Amount</label>
                   <input
                     type="number"
                     required
-                    placeholder="Enter amount (₹)"
+                    placeholder="Enter amount"
                     value={editAmount}
                     onChange={(e) => setEditAmount(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 outline-none font-medium text-slate-800 animate-none"
@@ -382,7 +432,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
               {/* Project association & Party classification */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">Project Association</label>
+                  <label className="text-[10px] uppercase font-bold text-slate-400">Project</label>
                   <select
                     value={editProjectId}
                     onChange={(e) => setEditProjectId(e.target.value)}
@@ -398,7 +448,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">Beneficiary Classification</label>
+                  <label className="text-[10px] uppercase font-bold text-slate-400">Role</label>
                   <select
                     value={editPartyRole}
                     onChange={(e) => setEditPartyRole(e.target.value as PartyRole)}
@@ -433,11 +483,11 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                   onChange={(e) => setEditPaymentMode(e.target.value as any)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none font-medium text-slate-800"
                 >
-                  <option value="bank_transfer">🏛️ Bank Nettransfer / Direct ACH</option>
-                  <option value="cash">💵 Hard Coin / Cash Reserves</option>
-                  <option value="upi">📱 UPI Wallet / GPay / PhonePe</option>
-                  <option value="cheque">✍️ Physical Drawer Cheque</option>
-                  <option value="card">💳 Company Debit/Credit Card</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="cash">Cash</option>
+                  <option value="upi">UPI</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="card">Card</option>
                 </select>
               </div>
 
@@ -455,7 +505,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
 
               {/* Bill Photo representation */}
               <div className="space-y-1">
-                <label className="text-[10px] uppercase font-bold text-slate-400">Attached Bill / Material Invoice Photo</label>
+                <label className="text-[10px] uppercase font-bold text-slate-400">Bill Attachment</label>
                 <div className="flex gap-3 items-center">
                   <input
                     type="file"
@@ -464,11 +514,7 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                          setEditBillPhoto(reader.result as string);
-                        };
-                        reader.readAsDataURL(file);
+                        readBillPhotoFile(file);
                       }
                     }}
                     className="hidden"
@@ -500,6 +546,9 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
                     <span className="text-[10px] text-slate-450 italic font-mono">No material receipt scanned</span>
                   )}
                 </div>
+                {saveError && (
+                  <div className="text-[10px] font-bold text-rose-600">{saveError}</div>
+                )}
               </div>
 
               {/* Actions Footer */}
