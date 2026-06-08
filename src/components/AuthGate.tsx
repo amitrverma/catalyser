@@ -89,7 +89,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     }
 
     if (mode === 'signup' && !result.data.session) {
-      setMessage('Account created. Check your email if confirmation is enabled in Supabase.');
+      setMessage('Account created. Check your email to verify it, then sign in to create or join your organization.');
     }
 
     setLoading(false);
@@ -127,9 +127,11 @@ export default function AuthGate({ children }: AuthGateProps) {
             <LockKeyhole size={20} />
           </div>
           <div>
-            <h1 className="text-xl font-black text-slate-900">Sign in to Catalyser</h1>
+            <h1 className="text-xl font-black text-slate-900">
+              {mode === 'signup' ? 'Create your Catalyser account' : 'Sign in to Catalyser'}
+            </h1>
             <p className="text-xs text-slate-500 mt-1">
-              Sync projects, ledgers, contacts, and documents across devices.
+              Access your organization workspace, projects, contacts, ledgers, and documents.
             </p>
           </div>
         </div>
@@ -193,7 +195,7 @@ export default function AuthGate({ children }: AuthGateProps) {
           }}
           className="text-xs font-bold text-blue-700 hover:text-blue-800 bg-transparent border-none cursor-pointer"
         >
-          {mode === 'signin' ? 'Need an account? Create one' : 'Already have an account? Sign in'}
+          {mode === 'signin' ? 'New organization or invited user? Create an account' : 'Already have an account? Sign in'}
         </button>
       </div>
     </div>

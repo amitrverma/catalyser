@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Project, Payment, Contact, PaymentMode, PaymentType, DbData, PartyRole } from '../types';
-import { cacheDbData, deletePayment, getDbData, persistPayment } from '../lib/db';
+import { deletePayment, getDbData, persistPayment } from '../lib/db';
 import { uploadPaymentBillDataUrl, validateBillImageFile } from '../lib/fileStorage';
 import { formatCurrency, formatDate } from '../lib/formatter';
 import { PARTY_ROLE_OPTIONS } from '../lib/roleLabels';
@@ -55,13 +55,15 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
         const updatedPayments = currentDb.payments.map((item) =>
           item.id === payment.id ? { ...item, billPhotoStoragePath: storagePath } : item,
         );
-        const updatedDb = { ...currentDb, payments: updatedPayments };
-        cacheDbData(updatedDb);
         const persistedPayment = updatedPayments.find((item) => item.id === payment.id);
         if (persistedPayment) {
-          void persistPayment({ ...persistedPayment, billPhoto: undefined, billPhotoStoragePath: storagePath });
+          void persistPayment({ ...persistedPayment, billPhoto: undefined, billPhotoStoragePath: storagePath }).then(async (saved) => {
+            if (saved) {
+              setDb(await getDbData());
+            }
+          });
         }
-        return updatedDb;
+        return { ...currentDb, payments: updatedPayments };
       });
     } catch (error) {
       console.error('Bill photo upload failed:', error);
@@ -155,34 +157,35 @@ export default function PartyLedgerStandalone({ partyName }: PartyLedgerStandalo
       return p;
     });
 
-    const updatedDb = { ...db, payments: updatedPayments };
-    setDb(updatedDb);
-    cacheDbData(updatedDb);
     const savedPayment = updatedPayments.find((payment) => payment.id === editingPayment.id);
     if (savedPayment) {
-      void persistPayment(savedPayment);
-      void syncPaymentBillPhoto(savedPayment);
+      void persistPayment(savedPayment).then(async (saved) => {
+        if (!saved) {
+          setSaveError('Supabase rejected the transaction update.');
+          return;
+        }
+        setDb(await getDbData());
+        void syncPaymentBillPhoto(savedPayment);
+        setEditingPayment(null);
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 3000);
+        window.dispatchEvent(new Event('custom-db-updated'));
+      });
     }
-    setEditingPayment(null);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
-
-    // Notify other tabs immediately
-    window.dispatchEvent(new Event('custom-db-updated'));
   };
 
   const handleDeletePayment = (id: string) => {
-    const updatedPayments = db.payments.filter((p) => p.id !== id);
-    const updatedDb = { ...db, payments: updatedPayments };
-    setDb(updatedDb);
-    cacheDbData(updatedDb);
-    void deletePayment(id);
-    setDeleteConfirmId(null);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
-
-    // Notify other tabs immediately
-    window.dispatchEvent(new Event('custom-db-updated'));
+    void deletePayment(id).then(async (deleted) => {
+      if (!deleted) {
+        setSaveError('Supabase rejected the transaction delete.');
+        return;
+      }
+      setDb(await getDbData());
+      setDeleteConfirmId(null);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+      window.dispatchEvent(new Event('custom-db-updated'));
+    });
   };
 
   return (

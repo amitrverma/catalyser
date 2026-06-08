@@ -31,7 +31,7 @@ type NavigatorWithContacts = Navigator & {
 
 interface ContactManagerProps {
   contacts: Contact[];
-  onAddContact: (name: string, role: ContactRole, phone: string, email: string, company: string, gstNumber?: string, address?: string) => void;
+  onAddContact?: (name: string, role: ContactRole, phone: string, email: string, company: string, gstNumber?: string, address?: string) => void;
   onAddContacts?: (contacts: ContactInput[]) => Promise<boolean> | boolean | void;
   onUpdateContact?: (contactId: string, contact: ContactUpdate) => Promise<boolean> | boolean | void;
   onUpdateContactRole?: (contactId: string, role: ContactRole) => void;
@@ -76,6 +76,7 @@ export default function ContactManager({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!onAddContact) return;
     if (!name.trim()) return;
     onAddContact(name, role, phone, email, company, gstNumber.trim() || undefined, address.trim() || undefined);
     setName('');
@@ -124,10 +125,10 @@ export default function ContactManager({
       if (onAddContacts) {
         const saved = await onAddContacts(importedContacts);
         if (saved === false) {
-          setImportStatus('Imported locally, but cloud sync failed. Please stay signed in and try again.');
+          setImportStatus('Supabase rejected the imported contacts. Nothing was saved. Please try again.');
           return;
         }
-      } else {
+      } else if (onAddContact) {
         importedContacts.forEach((contact) => {
           onAddContact(contact.name, contact.role, contact.phone, contact.email, contact.company);
         });
@@ -166,10 +167,10 @@ export default function ContactManager({
       if (onAddContacts) {
         const saved = await onAddContacts(newContacts);
         if (saved === false) {
-          setImportStatus('Imported locally, but cloud sync failed. Please stay signed in and try again.');
+          setImportStatus('Supabase rejected the imported contacts. Nothing was saved. Please try again.');
           return;
         }
-      } else {
+      } else if (onAddContact) {
         newContacts.forEach((contact) => {
           onAddContact(contact.name, contact.role, contact.phone, contact.email, contact.company, contact.gstNumber, contact.address);
         });
@@ -209,7 +210,7 @@ export default function ContactManager({
     });
 
     if (saved === false) {
-      setImportStatus('Contact updated locally, but cloud sync failed. Please try again before signing out.');
+      setImportStatus('Supabase rejected the contact update. Nothing was saved. Please try again.');
       return;
     }
 
@@ -257,35 +258,39 @@ export default function ContactManager({
             onChange={(e) => setSearchQuery(e.target.value)}
             className="min-w-0 flex-1 bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
-          <button
-            onClick={() => setShowAddForm(true)}
-            className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3 py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-xs whitespace-nowrap"
-          >
-            <Plus size={14} /> Add Partner
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleImportFromDeviceContacts()}
-            className="bg-white hover:bg-slate-50 text-slate-650 font-bold text-xs px-3 py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 whitespace-nowrap"
-            title="Import from this device's contacts when supported"
-          >
-            <UserPlus size={14} /> Import Contacts
-          </button>
-          <label
-            className="bg-white hover:bg-slate-50 text-slate-650 font-bold text-xs px-3 py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 whitespace-nowrap"
-            title="Import a Google Contacts CSV export or vCard file"
-          >
-            <Upload size={14} /> Import File
-            <input
-              type="file"
-              accept=".csv,.vcf,text/csv,text/vcard"
-              onChange={(event) => {
-                void handleImportFromFile(event.target.files?.[0]);
-                event.target.value = '';
-              }}
-              className="hidden"
-            />
-          </label>
+          {onAddContact && (
+            <>
+              <button
+                onClick={() => setShowAddForm(true)}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3 py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-xs whitespace-nowrap"
+              >
+                <Plus size={14} /> Add Partner
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleImportFromDeviceContacts()}
+                className="bg-white hover:bg-slate-50 text-slate-650 font-bold text-xs px-3 py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 whitespace-nowrap"
+                title="Import from this device's contacts when supported"
+              >
+                <UserPlus size={14} /> Import Contacts
+              </button>
+              <label
+                className="bg-white hover:bg-slate-50 text-slate-650 font-bold text-xs px-3 py-2 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 whitespace-nowrap"
+                title="Import a Google Contacts CSV export or vCard file"
+              >
+                <Upload size={14} /> Import File
+                <input
+                  type="file"
+                  accept=".csv,.vcf,text/csv,text/vcard"
+                  onChange={(event) => {
+                    void handleImportFromFile(event.target.files?.[0]);
+                    event.target.value = '';
+                  }}
+                  className="hidden"
+                />
+              </label>
+            </>
+          )}
         </div>
 
         {importStatus && (

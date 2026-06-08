@@ -6,8 +6,8 @@ import { Plus, FolderPlus, MapPin, Calendar, User, Search, Layers, ArrowRight, C
 interface ProjectListProps {
   projects: Project[];
   payments: Payment[];
-  onAddProject: (name: string, description: string, budget: number, clientName: string, address: string) => void;
-  onUpdateStatus: (projectId: string, status: ProjectStatus) => void;
+  onAddProject?: (name: string, description: string, budget: number, clientName: string, address: string) => void;
+  onUpdateStatus?: (projectId: string, status: ProjectStatus) => void;
   onSelectProject: (projectId: string) => void;
 }
 
@@ -43,6 +43,7 @@ export default function ProjectList({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!onAddProject) return;
     if (!name.trim() || !clientName.trim()) return;
     onAddProject(
       name,
@@ -141,14 +142,16 @@ export default function ProjectList({
             )}
           </div>
           
-          <button
-            onClick={() => setShowAddForm(true)}
-            className="bg-slate-950 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all duration-150 cursor-pointer text-center border-none"
-            id="open-add-project-modal-btn"
-          >
-            <Plus size={16} />
-            Add Project
-          </button>
+          {onAddProject && (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="bg-slate-950 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all duration-150 cursor-pointer text-center border-none"
+              id="open-add-project-modal-btn"
+            >
+              <Plus size={16} />
+              Add Project
+            </button>
+          )}
         </div>
       </div>
 
@@ -259,12 +262,14 @@ export default function ProjectList({
           <p className="text-slate-400 text-xs max-w-sm mx-auto mt-1">
             Refine the filters or create a project to start tracking budgets, payments, and documents.
           </p>
-          <button
-            onClick={() => setShowAddForm(true)}
-            className="mt-4 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-blue-650 font-bold text-xs rounded-lg inline-flex items-center gap-1 cursor-pointer"
-          >
-            <Plus size={14} /> Add First Project
-          </button>
+          {onAddProject && (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="mt-4 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-blue-650 font-bold text-xs rounded-lg inline-flex items-center gap-1 cursor-pointer"
+            >
+              <Plus size={14} /> Add First Project
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="projects-grid">
@@ -313,16 +318,18 @@ export default function ProjectList({
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          setOpenStatusMenuId(openStatusMenuId === proj.id ? null : proj.id);
+                          if (onUpdateStatus) {
+                            setOpenStatusMenuId(openStatusMenuId === proj.id ? null : proj.id);
+                          }
                         }}
-                        className={`inline-flex min-w-28 items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition hover:shadow-xs cursor-pointer ${activeStatus.className}`}
-                        aria-haspopup="menu"
-                        aria-expanded={openStatusMenuId === proj.id}
+                        className={`inline-flex min-w-28 items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition hover:shadow-xs ${onUpdateStatus ? 'cursor-pointer' : 'cursor-default'} ${activeStatus.className}`}
+                        aria-haspopup={onUpdateStatus ? 'menu' : undefined}
+                        aria-expanded={onUpdateStatus ? openStatusMenuId === proj.id : undefined}
                       >
                         <span>{activeStatus.label}</span>
-                        <span className="text-[10px] leading-none">v</span>
+                        {onUpdateStatus && <span className="text-[10px] leading-none">v</span>}
                       </button>
-                      {openStatusMenuId === proj.id && (
+                      {onUpdateStatus && openStatusMenuId === proj.id && (
                         <div className="absolute right-0 top-9 z-30 w-32 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
                           {statusOptions.map((status) => (
                             <button

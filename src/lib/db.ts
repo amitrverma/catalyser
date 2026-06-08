@@ -168,7 +168,6 @@ const INITIAL_PAYMENTS: Payment[] = [
 ];
 
 const INITIAL_DOCUMENTS: CloudDocument[] = [];
-let memoryDbData: DbData | null = null;
 
 const EMPTY_DB_DATA: DbData = {
   projects: [],
@@ -179,13 +178,34 @@ const EMPTY_DB_DATA: DbData = {
 
 export type DbLoadResult = {
   data: DbData;
-  source: 'supabase' | 'local' | 'fallback';
+  source: 'supabase' | 'unconfigured' | 'unauthenticated' | 'error';
   error?: unknown;
 };
 
 export type DbValidationResult =
   | { valid: true; data: DbData }
   | { valid: false; message: string };
+
+let lastPersistenceError: string | null = null;
+
+function describePersistenceError(error: unknown) {
+  if (error && typeof error === 'object') {
+    const record = error as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown };
+    const parts = [
+      typeof record.code === 'string' ? record.code : null,
+      typeof record.message === 'string' ? record.message : null,
+      typeof record.details === 'string' ? record.details : null,
+      typeof record.hint === 'string' ? record.hint : null,
+    ].filter(Boolean);
+    if (parts.length > 0) return parts.join(' - ');
+  }
+
+  return error instanceof Error ? error.message : 'Unknown Supabase error';
+}
+
+export function getLastPersistenceError() {
+  return lastPersistenceError;
+}
 
 const PROJECT_STATUSES = new Set(['ongoing', 'completed', 'onhold']);
 const PAYMENT_TYPES = new Set(['in', 'out']);
@@ -369,26 +389,6 @@ function hasDocumentPayload(document: CloudDocument) {
   return document.syncStatus !== 'synced' || Boolean(document.storagePath || document.dataUrl);
 }
 
-export function getLocalDbData(): DbData {
-  if (!memoryDbData) {
-    memoryDbData = import.meta.env.DEV
-      ? {
-          projects: INITIAL_PROJECTS,
-          payments: INITIAL_PAYMENTS,
-          contacts: INITIAL_CONTACTS,
-          documents: INITIAL_DOCUMENTS,
-        }
-      : EMPTY_DB_DATA;
-  }
-
-  return {
-    projects: [...memoryDbData.projects],
-    payments: [...memoryDbData.payments],
-    contacts: [...memoryDbData.contacts],
-    documents: memoryDbData.documents.filter(hasDocumentPayload),
-  };
-}
-
 export async function getDbData(): Promise<DbData> {
   const result = await loadDbData();
   return result.data;
@@ -396,7 +396,7 @@ export async function getDbData(): Promise<DbData> {
 
 export async function loadDbData(): Promise<DbLoadResult> {
   if (!isSupabaseConfigured || !supabase) {
-    return { data: getLocalDbData(), source: 'local' };
+    return { data: EMPTY_DB_DATA, source: 'unconfigured' };
   }
 
   const {
@@ -404,7 +404,7 @@ export async function loadDbData(): Promise<DbLoadResult> {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return { data: getLocalDbData(), source: 'local' };
+    return { data: EMPTY_DB_DATA, source: 'unauthenticated' };
   }
 
   try {
@@ -423,7 +423,7 @@ export async function loadDbData(): Promise<DbLoadResult> {
 
     if (error) {
       console.error('Supabase load failed:', error);
-      return { data: getLocalDbData(), source: 'fallback', error };
+      return { data: EMPTY_DB_DATA, source: 'error', error };
     }
 
     const data: DbData = {
@@ -476,25 +476,11 @@ export async function loadDbData(): Promise<DbLoadResult> {
         .filter(hasDocumentPayload),
     };
 
-    saveLocalDbData(data);
     return { data, source: 'supabase' };
   } catch (error) {
     console.error('Supabase load failed:', error);
-    return { data: getLocalDbData(), source: 'fallback', error };
+    return { data: EMPTY_DB_DATA, source: 'error', error };
   }
-}
-
-function saveLocalDbData(data: DbData) {
-  memoryDbData = {
-    projects: [...data.projects],
-    payments: [...data.payments],
-    contacts: [...data.contacts],
-    documents: [...data.documents],
-  };
-}
-
-export function cacheDbData(data: DbData) {
-  saveLocalDbData(data);
 }
 
 export function prepareDbDataForBackup(data: DbData): DbData {
@@ -617,9 +603,28 @@ async function persistSingleRow(
 
   try {
     await throwOnSupabaseError(supabase.from(tableName).upsert(row as never, { onConflict: 'id' }));
+    lastPersistenceError = null;
     return true;
   } catch (error) {
     console.error(`Supabase ${tableName} row save failed:`, error);
+    lastPersistenceError = describePersistenceError(error);
+    return false;
+  }
+}
+
+async function insertSingleRow(
+  tableName: 'projects' | 'contacts' | 'payments' | 'documents',
+  row: ProjectRow | ContactRow | PaymentRow | DocumentRow,
+) {
+  if (!supabase) return true;
+
+  try {
+    await throwOnSupabaseError(supabase.from(tableName).insert(row as never));
+    lastPersistenceError = null;
+    return true;
+  } catch (error) {
+    console.error(`Supabase ${tableName} row insert failed:`, error);
+    lastPersistenceError = describePersistenceError(error);
     return false;
   }
 }
@@ -631,10 +636,17 @@ async function deleteSingleRow(tableName: 'contacts' | 'payments' | 'documents',
   if (!context) return true;
 
   try {
-    await throwOnSupabaseError(supabase.from(tableName).delete().eq('user_id', context.userId).eq('id', id));
+    const deleteQuery = supabase.from(tableName).delete().eq('id', id);
+    const scopedDelete = context.orgId
+      ? deleteQuery.eq('org_id', context.orgId)
+      : deleteQuery.eq('user_id', context.userId).is('org_id', null);
+
+    await throwOnSupabaseError(scopedDelete);
+    lastPersistenceError = null;
     return true;
   } catch (error) {
     console.error(`Supabase ${tableName} row delete failed:`, error);
+    lastPersistenceError = describePersistenceError(error);
     return false;
   }
 }
@@ -645,10 +657,22 @@ export async function persistProject(project: Project): Promise<boolean> {
   return persistSingleRow('projects', toProjectRow(project, context.userId, context.orgId));
 }
 
+export async function insertProject(project: Project): Promise<boolean> {
+  const context = await getPersistenceContext();
+  if (!context) return true;
+  return insertSingleRow('projects', toProjectRow(project, context.userId, context.orgId));
+}
+
 export async function persistContact(contact: Contact): Promise<boolean> {
   const context = await getPersistenceContext();
   if (!context) return true;
   return persistSingleRow('contacts', toContactRow(contact, context.userId, context.orgId));
+}
+
+export async function insertContact(contact: Contact): Promise<boolean> {
+  const context = await getPersistenceContext();
+  if (!context) return true;
+  return insertSingleRow('contacts', toContactRow(contact, context.userId, context.orgId));
 }
 
 export async function persistPayment(payment: Payment): Promise<boolean> {
@@ -668,9 +692,6 @@ export const deletePayment = (id: string) => deleteSingleRow('payments', id);
 export const deleteDocument = (id: string) => deleteSingleRow('documents', id);
 
 export async function saveDbData(data: DbData): Promise<boolean> {
-  const previousLocalData = getLocalDbData();
-  saveLocalDbData(data);
-
   if (!isSupabaseConfigured || !supabase) {
     return true;
   }
@@ -680,28 +701,39 @@ export async function saveDbData(data: DbData): Promise<boolean> {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return true;
+    return false;
   }
 
   const activeOrg = await ensureActiveOrganization();
   const orgId = activeOrg?.id || null;
+  const previousDataResult = await loadDbData();
+  if (previousDataResult.source === 'error') {
+    return false;
+  }
+  const previousData = previousDataResult.data;
 
   const projectRows = data.projects.map((project) => toProjectRow(project, user.id, orgId));
   const contactRows = data.contacts.map((contact) => toContactRow(contact, user.id, orgId));
   const paymentRows = data.payments.map((payment) => toPaymentRow(payment, user.id, orgId));
   const documentRows = data.documents.map((document) => toDocumentRow(document, user.id, orgId));
 
-  const deletedProjectIds = missingIds(previousLocalData.projects, data.projects);
-  const deletedContactIds = missingIds(previousLocalData.contacts, data.contacts);
-  const deletedPaymentIds = missingIds(previousLocalData.payments, data.payments);
-  const deletedDocumentIds = missingIds(previousLocalData.documents, data.documents);
+  const deletedProjectIds = missingIds(previousData.projects, data.projects);
+  const deletedContactIds = missingIds(previousData.contacts, data.contacts);
+  const deletedPaymentIds = missingIds(previousData.payments, data.payments);
+  const deletedDocumentIds = missingIds(previousData.documents, data.documents);
+
+  const scopedDelete = (tableName: 'projects' | 'contacts' | 'payments' | 'documents', ids: string[]) => {
+    if (!ids.length) return null;
+    const deleteQuery = supabase.from(tableName).delete().in('id', ids);
+    return orgId ? deleteQuery.eq('org_id', orgId) : deleteQuery.eq('user_id', user.id).is('org_id', null);
+  };
 
   try {
     const deletions = [
-      deletedPaymentIds.length ? supabase.from('payments').delete().eq('user_id', user.id).in('id', deletedPaymentIds) : null,
-      deletedDocumentIds.length ? supabase.from('documents').delete().eq('user_id', user.id).in('id', deletedDocumentIds) : null,
-      deletedProjectIds.length ? supabase.from('projects').delete().eq('user_id', user.id).in('id', deletedProjectIds) : null,
-      deletedContactIds.length ? supabase.from('contacts').delete().eq('user_id', user.id).in('id', deletedContactIds) : null,
+      scopedDelete('payments', deletedPaymentIds),
+      scopedDelete('documents', deletedDocumentIds),
+      scopedDelete('projects', deletedProjectIds),
+      scopedDelete('contacts', deletedContactIds),
     ].filter(Boolean);
 
     const parentUpserts = [
@@ -717,9 +749,11 @@ export async function saveDbData(data: DbData): Promise<boolean> {
     await Promise.all(deletions.map((operation) => throwOnSupabaseError(operation as PromiseLike<{ error: unknown }>)));
     await Promise.all(parentUpserts.map((operation) => throwOnSupabaseError(operation as PromiseLike<{ error: unknown }>)));
     await Promise.all(childUpserts.map((operation) => throwOnSupabaseError(operation as PromiseLike<{ error: unknown }>)));
+    lastPersistenceError = null;
     return true;
   } catch (error) {
     console.error('Supabase save failed:', error);
+    lastPersistenceError = describePersistenceError(error);
     return false;
   }
 }

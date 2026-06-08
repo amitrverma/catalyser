@@ -2,6 +2,7 @@ import type {
   ContactRole,
   DocumentCategory,
   PartyRole,
+  PlatformRole,
   PaymentMode,
   PaymentType,
   ProjectStatus,
@@ -39,15 +40,53 @@ export interface Database {
         Row: RowBase & {
           organization_id: string;
           user_id: string;
-          role: 'owner' | 'admin' | 'accountant' | 'project_manager' | 'viewer';
+          role: PlatformRole;
         };
         Insert: {
           organization_id: string;
           user_id: string;
-          role: 'owner' | 'admin' | 'accountant' | 'project_manager' | 'viewer';
+          role: PlatformRole;
           created_at?: string;
         };
-        Update: { role?: 'owner' | 'admin' | 'accountant' | 'project_manager' | 'viewer'; updated_at?: string };
+        Update: { role?: PlatformRole; updated_at?: string };
+        Relationships: [];
+      };
+      organization_invitations: {
+        Row: RowBase & {
+          id: string;
+          organization_id: string;
+          email: string;
+          role: Exclude<PlatformRole, 'owner'>;
+          invited_by: string;
+          status: 'pending' | 'accepted' | 'revoked' | 'expired';
+          token_hash: string | null;
+          expires_at: string | null;
+          accepted_by: string | null;
+          accepted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          email: string;
+          role: Exclude<PlatformRole, 'owner'>;
+          invited_by: string;
+          status?: 'pending' | 'accepted' | 'revoked' | 'expired';
+          token_hash?: string | null;
+          expires_at?: string | null;
+          accepted_by?: string | null;
+          accepted_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          email?: string;
+          role?: Exclude<PlatformRole, 'owner'>;
+          status?: 'pending' | 'accepted' | 'revoked' | 'expired';
+          token_hash?: string | null;
+          expires_at?: string | null;
+          accepted_by?: string | null;
+          accepted_at?: string | null;
+          updated_at?: string;
+        };
         Relationships: [];
       };
       projects: {
@@ -139,6 +178,24 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['payments']['Insert']>;
         Relationships: [];
       };
+      project_assignments: {
+        Row: {
+          project_id: string;
+          user_id: string;
+          assigned_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          project_id: string;
+          user_id: string;
+          assigned_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          assigned_by?: string | null;
+        };
+        Relationships: [];
+      };
       documents: {
         Row: RowBase & {
           id: string;
@@ -186,9 +243,25 @@ export interface Database {
     };
     Views: Record<string, never>;
     Functions: {
+      create_organization: {
+        Args: { organization_name: string; initial_settings?: Json; initial_salaries?: Json };
+        Returns: string;
+      };
       ensure_personal_organization: {
         Args: Record<string, never>;
         Returns: string;
+      };
+      accept_organization_invitation: {
+        Args: { invitation_id: string };
+        Returns: string;
+      };
+      update_organization_member_role: {
+        Args: { target_organization_id: string; target_user_id: string; next_role: string };
+        Returns: undefined;
+      };
+      remove_organization_member: {
+        Args: { target_organization_id: string; target_user_id: string };
+        Returns: undefined;
       };
     };
     Enums: Record<string, never>;

@@ -1,6 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, ShieldCheck, Check, RotateCcw, AlertCircle, Sparkles, Building, KeyRound, MapPin, ReceiptText, Database, Cloud, RefreshCw, UploadCloud, DownloadCloud, FileDown, FileUp, Save, Server, Users, UserPlus, Trash2, Edit, Plus, X, Briefcase } from 'lucide-react';
-import { getDbData, prepareDbDataForBackup, saveDbData, validateDbDataPayload } from '../lib/db';
+import { Settings, Check, RotateCcw, AlertCircle, Sparkles, Building, KeyRound, MapPin, ReceiptText, Database, Save, Users, UserPlus, Trash2, Edit, Plus, X, Briefcase } from 'lucide-react';
+import { isSupabaseConfigured } from '../lib/supabase';
+import {
+  ensureActiveOrganization,
+  inviteOrganizationMember,
+  listOrganizationInvitations,
+  listOrganizationMembers,
+  removeOrganizationMember,
+  revokeOrganizationInvitation,
+  updateOrganizationMemberRole,
+  type ActiveOrganization,
+  type OrganizationInvitation,
+  type OrganizationMember,
+} from '../lib/orgs';
+import { canManagePlatformRole, getPlatformRoleConfig, hasPlatformPermission, PLATFORM_ROLE_OPTIONS } from '../lib/platformRoles';
+import { PlatformRole } from '../types';
 import { persistSettingsToSupabase } from '../lib/settingsSync';
 import {
   DEFAULT_COMPANY_SETTINGS,
@@ -11,6 +25,8 @@ import {
   resetSettingsMemory,
   setSetting,
 } from '../lib/settingsStore';
+
+type SettingsTab = 'profile' | 'assets' | 'access' | 'payroll';
 
 export default function SettingsManager() {
   const [formData, setFormData] = useState({
@@ -28,6 +44,13 @@ export default function SettingsManager() {
   const [signSaveSuccess, setSignSaveSuccess] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
+  const [activeOrg, setActiveOrg] = useState<ActiveOrganization | null>(null);
+  const [members, setMembers] = useState<OrganizationMember[]>([]);
+  const [invitations, setInvitations] = useState<OrganizationInvitation[]>([]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<Exclude<OrganizationInvitation['role'], 'owner'>>('staff');
+  const [memberStatus, setMemberStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>('profile');
 
   const validateSettingsAsset = (file: File) => {
     const supportedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']);
@@ -56,13 +79,85 @@ export default function SettingsManager() {
   const persistSettingsNow = async () => {
     const saved = await persistSettingsToSupabase();
     if (!saved) {
-      setSettingsSaveError('Saved locally, but cloud sync failed. Retry before signing out.');
+      setSettingsSaveError('Settings could not be updated in Supabase. Try again.');
       return false;
     }
 
     setSettingsSaveError(null);
     window.dispatchEvent(new Event('custom-settings-updated'));
     return true;
+  };
+
+  const refreshWorkspaceMembers = async () => {
+    const organization = await ensureActiveOrganization();
+    setActiveOrg(organization);
+    if (!organization) {
+      setMembers([]);
+      setInvitations([]);
+      return;
+    }
+
+    const [nextMembers, nextInvitations] = await Promise.all([
+      listOrganizationMembers(organization.id),
+      listOrganizationInvitations(organization.id),
+    ]);
+    setMembers(nextMembers);
+    setInvitations(nextInvitations);
+  };
+
+  useEffect(() => {
+    void refreshWorkspaceMembers();
+  }, []);
+
+  const handleInviteMember = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeOrg || !inviteEmail.trim()) return;
+
+    const invited = await inviteOrganizationMember(activeOrg.id, inviteEmail, inviteRole);
+    if (!invited) {
+      setMemberStatus({ success: false, message: 'Invitation could not be saved. Check your role and try again.' });
+      return;
+    }
+
+    setInviteEmail('');
+    setInviteRole('staff');
+    setMemberStatus({ success: true, message: 'Invitation saved.' });
+    await refreshWorkspaceMembers();
+  };
+
+  const handleRevokeInvitation = async (invitationId: string) => {
+    const revoked = await revokeOrganizationInvitation(invitationId);
+    if (!revoked) {
+      setMemberStatus({ success: false, message: 'Invitation could not be revoked.' });
+      return;
+    }
+
+    setMemberStatus({ success: true, message: 'Invitation revoked.' });
+    await refreshWorkspaceMembers();
+  };
+
+  const handleUpdateMemberRole = async (member: OrganizationMember, role: PlatformRole) => {
+    if (!activeOrg) return;
+    const updated = await updateOrganizationMemberRole(activeOrg.id, member.userId, role);
+    if (!updated) {
+      setMemberStatus({ success: false, message: 'Member role could not be changed.' });
+      return;
+    }
+
+    setMemberStatus({ success: true, message: 'Member role updated.' });
+    await refreshWorkspaceMembers();
+  };
+
+  const handleRemoveMember = async (member: OrganizationMember) => {
+    if (!activeOrg) return;
+    const removed = await removeOrganizationMember(activeOrg.id, member.userId);
+    if (!removed) {
+      setMemberStatus({ success: false, message: 'Member could not be removed.' });
+      return;
+    }
+
+    setMemberStatus({ success: true, message: 'Member removed.' });
+    await refreshWorkspaceMembers();
   };
 
   const saveStaffList = async (newList: Array<{ id: string; name: string; role: string; salary: number }>) => {
@@ -112,17 +207,6 @@ export default function SettingsManager() {
     setEditingStaffId(null);
   };
 
-  // Storage settings state
-  const [storageType, setStorageType] = useState<'local' | 'cloud'>('local');
-  const [localPrefix, setLocalPrefix] = useState('cc_');
-  const [cloudEndpoint, setCloudEndpoint] = useState('');
-  const [cloudAuth, setCloudAuth] = useState('');
-
-  // Statuses for action feedbacks
-  const [testStatus, setTestStatus] = useState<{ success: boolean; message: string } | null>(null);
-  const [syncStatus, setSyncStatus] = useState<{ type: 'push' | 'pull'; success: boolean; message: string } | null>(null);
-  const [importStatus, setImportStatus] = useState<{ success: boolean; message: string } | null>(null);
-
   // Load custom values on mount
   useEffect(() => {
     const cName = getSetting('cc_company_name');
@@ -138,11 +222,6 @@ export default function SettingsManager() {
       stamp = getSetting('custom_stamp_sign_base64');
     }
     const signature = getSetting('custom_sign_base64');
-
-    const sType = (getSetting('cc_storage_type') as 'local' | 'cloud') || 'local';
-    const sPrefix = getSetting('cc_storage_local_prefix') || 'cc_';
-    const sEndpoint = getSetting('cc_storage_cloud_endpoint') || '';
-    const sAuth = getSetting('cc_storage_cloud_auth') || '';
 
     const bAccName = getSetting('cc_bank_account_name');
     const bBankName = getSetting('cc_bank_name');
@@ -176,10 +255,6 @@ export default function SettingsManager() {
       setPendingSign(signature);
     }
 
-    setStorageType(sType);
-    setLocalPrefix(sPrefix);
-    setCloudEndpoint(sEndpoint);
-    setCloudAuth(sAuth);
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -357,10 +432,6 @@ export default function SettingsManager() {
     setPendingLogo(null);
     setPendingStamp(null);
     setPendingSign(null);
-    setStorageType('local');
-    setLocalPrefix('cc_');
-    setCloudEndpoint('');
-    setCloudAuth('');
     setStaffList(DEFAULT_STAFF_SALARIES);
 
     window.dispatchEvent(new Event('custom-logo-updated'));
@@ -373,190 +444,85 @@ export default function SettingsManager() {
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 
-  const handleSaveStorageSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSetting('cc_storage_type', storageType);
-    setSetting('cc_storage_local_prefix', localPrefix);
-    setSetting('cc_storage_cloud_endpoint', cloudEndpoint);
-    setSetting('cc_storage_cloud_auth', cloudAuth);
-
-    window.dispatchEvent(new Event('custom-db-updated'));
-    const saved = await persistSettingsNow();
-    if (!saved) return;
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
-  };
-
-  const handleExportDB = async () => {
-    const data = prepareDbDataForBackup(await getDbData());
-    const dbDump = {
-      exportedAt: new Date().toISOString(),
-      data
-    };
-
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dbDump, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `catalyser_workspace_backup.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
-
-  const handleImportDB = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const parsed = JSON.parse(event.target?.result as string);
-        const validation = validateDbDataPayload(parsed?.data);
-        if ('message' in validation) {
-          setImportStatus({ success: false, message: validation.message });
-        } else {
-          const saved = await saveDbData(validation.data);
-
-          if (saved) {
-            window.dispatchEvent(new Event('custom-db-updated'));
-            window.dispatchEvent(new Event('custom-settings-updated'));
-
-            setImportStatus({ success: true, message: 'Backup imported.' });
-          } else {
-            setImportStatus({ success: false, message: 'Import parsed, but database persistence failed. Retry before using this backup.' });
-          }
-        }
-      } catch (err) {
-        setImportStatus({ success: false, message: 'Failed to read database parameters from JSON.' });
-      }
-      setTimeout(() => setImportStatus(null), 5000);
-    };
-    reader.readAsText(file);
-  };
-
-  const handleTestCloudConnection = async () => {
-    if (!cloudEndpoint) {
-      setTestStatus({ success: false, message: 'Input endpoint query parameters first.' });
-      return;
-    }
-    setTestStatus({ success: true, message: 'Initiating network check...' });
-    try {
-      const headers: Record<string, string> = {
-        'Accept': 'application/json, text/plain, */*'
-      };
-      if (cloudAuth) {
-        headers['Authorization'] = cloudAuth.startsWith('Bearer ') ? cloudAuth : `Bearer ${cloudAuth}`;
-      }
-      const res = await fetch(cloudEndpoint, { method: 'GET', headers });
-      if (res.ok) {
-        setTestStatus({ success: true, message: `Connection successful. Status ${res.status}.` });
-      } else {
-        setTestStatus({ success: true, message: `Connection reached the server. Status ${res.status}.` });
-      }
-    } catch (err: any) {
-      setTestStatus({ success: false, message: `Connection failed: ${err?.message || 'Unable to reach endpoint'}.` });
-    }
-    setTimeout(() => setTestStatus(null), 6000);
-  };
-
-  const handlePushToCloud = async () => {
-    if (!cloudEndpoint) {
-      setSyncStatus({ type: 'push', success: false, message: 'Add an API endpoint first.' });
-      return;
-    }
-    try {
-      const data = await getDbData();
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (cloudAuth) {
-        headers['Authorization'] = cloudAuth.startsWith('Bearer ') ? cloudAuth : `Bearer ${cloudAuth}`;
-      }
-      const res = await fetch(cloudEndpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(data)
-      });
-      if (res.ok) {
-        setSyncStatus({ type: 'push', success: true, message: 'Workspace data uploaded.' });
-      } else {
-        setSyncStatus({ type: 'push', success: false, message: `Sync rejected. Server status: ${res.status}.` });
-      }
-    } catch (err: any) {
-      setSyncStatus({ type: 'push', success: false, message: `Sync action failed: ${err?.message}` });
-    }
-    setTimeout(() => setSyncStatus(null), 6000);
-  };
-
-  const handlePullFromCloud = async () => {
-    if (!cloudEndpoint) {
-      setSyncStatus({ type: 'pull', success: false, message: 'No sync target defined.' });
-      return;
-    }
-    try {
-      const headers: Record<string, string> = { 'Accept': 'application/json' };
-      if (cloudAuth) {
-        headers['Authorization'] = cloudAuth.startsWith('Bearer ') ? cloudAuth : `Bearer ${cloudAuth}`;
-      }
-      const res = await fetch(cloudEndpoint, { method: 'GET', headers });
-      if (!res.ok) throw new Error(`Received status ${res.status}`);
-      const info = await res.json();
-      let payload = info;
-      if (info && typeof info === 'object' && !Array.isArray(info)) {
-        if (info.data && Array.isArray(info.data.projects)) payload = info.data;
-        else if (info.record && Array.isArray(info.record.projects)) payload = info.record;
-      }
-      const validation = validateDbDataPayload(payload);
-      if ('message' in validation) {
-        setSyncStatus({ type: 'pull', success: false, message: validation.message });
-      } else {
-        const saved = await saveDbData(validation.data);
-
-        if (!saved) {
-          setSyncStatus({ type: 'pull', success: false, message: 'Pulled data, but database persistence failed. Retry before using this restore.' });
-          setTimeout(() => setSyncStatus(null), 6000);
-          return;
-        }
-
-        window.dispatchEvent(new Event('custom-db-updated'));
-        window.dispatchEvent(new Event('custom-settings-updated'));
-        setSyncStatus({ type: 'pull', success: true, message: 'External data restored.' });
-      }
-    } catch (err: any) {
-      setSyncStatus({ type: 'pull', success: false, message: `Sync pull failed: ${err?.message}` });
-    }
-    setTimeout(() => setSyncStatus(null), 6000);
-  };
+  const settingsTabs: Array<{ id: SettingsTab; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = [
+    { id: 'profile', label: 'Profile', icon: Building },
+    { id: 'assets', label: 'Assets', icon: Sparkles },
+    { id: 'access', label: 'Access', icon: Users },
+    { id: 'payroll', label: 'Payroll', icon: Briefcase },
+  ];
 
   return (
-    <div className="space-y-6 text-left" id="settings-management-tab">
+    <div className="space-y-3 text-left" id="settings-management-tab">
       {/* Settings Intro Card */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-150 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+      <div className="bg-white px-4 py-3 rounded-xl border border-slate-150">
         <div>
           <h3 className="font-black text-slate-800 text-base uppercase tracking-wide flex items-center gap-1.5">
-            <Settings size={18} className="text-blue-600 animate-spin-slow" /> Settings
+            <Settings size={18} className="text-blue-600" /> Settings
           </h3>
           <p className="text-xs text-slate-500 mt-1">
-            Manage firm details, invoice assets, payroll, and backup settings.
+            Manage firm details, invoice assets, payroll, and team access.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleResetDefaults}
-          className="px-3.5 py-1.5 border border-slate-205 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-xl transition font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-        >
-          <RotateCcw size={13} /> Reset Defaults
-        </button>
       </div>
 
       {settingsSaveError && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800 flex items-start gap-2">
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800 flex items-start gap-2">
           <AlertCircle size={15} className="mt-0.5 shrink-0 text-amber-600" />
           <span>{settingsSaveError}</span>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Form Settings Left Pane */}
-        <form onSubmit={handleSubmit} className="lg:col-span-2 space-y-6 bg-white p-6 rounded-2xl border border-slate-150">
+      <div className="space-y-0">
+        <div className="bg-white px-4 pt-3 rounded-t-xl border border-b-0 border-slate-150">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between lg:gap-6">
+            <div
+              className="flex max-w-full flex-wrap gap-0 lg:flex-1"
+              role="tablist"
+              aria-label="Settings sections"
+            >
+              {settingsTabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeSettingsTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    id={`settings-tab-${tab.id}`}
+                    type="button"
+                    role="tab"
+                    onClick={() => setActiveSettingsTab(tab.id)}
+                    className={`relative -mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border px-3 text-xs font-bold transition cursor-pointer ${
+                      isActive
+                        ? 'rounded-t-lg border-slate-200 border-b-white bg-white text-blue-700'
+                        : 'border-transparent bg-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                    }`}
+                    aria-selected={isActive}
+                    aria-controls={`settings-panel-${tab.id}`}
+                    tabIndex={isActive ? 0 : -1}
+                  >
+                    <Icon size={14} />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={handleResetDefaults}
+              className="mb-3 inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-205 bg-white px-3 text-xs font-bold text-slate-500 transition hover:bg-slate-50 hover:text-slate-800 cursor-pointer"
+            >
+              <RotateCcw size={13} /> Reset Defaults
+            </button>
+          </div>
+        </div>
+
+      {activeSettingsTab === 'profile' && (
+        <form
+          id="settings-panel-profile"
+          role="tabpanel"
+          aria-labelledby="settings-tab-profile"
+          onSubmit={handleSubmit}
+          className="space-y-6 bg-white p-5 rounded-b-xl border border-slate-150"
+        >
           <div className="space-y-4">
             <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-widest flex items-center gap-1.5 pb-2 border-b">
               <Building size={14} className="text-blue-600" /> Company Profile
@@ -727,9 +693,15 @@ export default function SettingsManager() {
             </button>
           </div>
         </form>
+      )}
 
-        {/* Logo settings right side panel */}
-        <div className="space-y-6">
+      {activeSettingsTab === 'assets' && (
+        <div
+          id="settings-panel-assets"
+          role="tabpanel"
+          aria-labelledby="settings-tab-assets"
+          className="grid grid-cols-1 gap-4 bg-white p-5 rounded-b-xl border border-slate-150 lg:grid-cols-3"
+        >
           <div className="bg-white p-5 rounded-2xl border border-slate-150 text-left space-y-4 flex flex-col justify-between h-auto">
             <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-widest flex items-center gap-1.5 pb-2 border-b">
               <Sparkles size={14} className="text-blue-600" /> Logo
@@ -1002,26 +974,174 @@ export default function SettingsManager() {
             </div>
           </div>
 
-          {/* Additional Security card */}
-          <div className="bg-slate-900 text-white rounded-2xl p-5 border border-slate-800 text-left space-y-3 relative overflow-hidden">
-            <div className="flex gap-3 items-start">
-              <div className="p-2 bg-slate-800 rounded-xl text-yellow-500 font-bold shrink-0">
-                <ShieldCheck size={18} />
+        </div>
+      )}
+
+      {activeSettingsTab === 'access' && (
+      <div
+        className="bg-white p-5 rounded-b-xl border border-slate-150 space-y-4 text-left"
+        id="settings-panel-access"
+        role="tabpanel"
+        aria-labelledby="settings-tab-access"
+      >
+        <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+          <div>
+            <h4 className="font-extrabold text-slate-800 text-xs sm:text-sm uppercase tracking-wider flex items-center gap-1.5">
+              <Users size={16} className="text-blue-600" /> Workspace Access
+            </h4>
+            <p className="text-[11px] text-slate-500 mt-0.5">Platform users who can sign in to this workspace.</p>
+          </div>
+          <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-50 text-slate-600 rounded-full font-mono uppercase tracking-wider">
+            {activeOrg ? getPlatformRoleConfig(activeOrg.role).label : 'Local'}
+          </span>
+        </div>
+
+        {!isSupabaseConfigured || !activeOrg ? (
+          <div className="rounded-xl border border-slate-150 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+            Member management is available after signing into a cloud workspace.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
+            <div className="xl:col-span-3 rounded-xl border border-slate-150 overflow-hidden">
+              <div className="grid grid-cols-12 gap-2 bg-slate-50 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <span className="col-span-5">Member</span>
+                <span className="col-span-4">Role</span>
+                <span className="col-span-3 text-right">Access</span>
               </div>
-              <div className="space-y-1">
-                <span className="text-[10px] font-mono tracking-wider font-bold text-slate-400 block uppercase">Persistence</span>
-                <h5 className="font-extrabold text-white text-xs">Cloud Sync</h5>
-                <p className="text-[10px] text-slate-405 leading-relaxed">
-                  Settings, payroll, invoice assets, and workspace records sync through Supabase.
-                </p>
+              <div className="divide-y divide-slate-100">
+                {members.length === 0 ? (
+                  <div className="px-3 py-4 text-xs text-slate-400">No members found.</div>
+                ) : (
+                  members.map((member) => {
+                    const canManageThisMember = Boolean(
+                      activeOrg &&
+                      hasPlatformPermission(activeOrg.role, 'manage_members') &&
+                      canManagePlatformRole(activeOrg.role, member.role),
+                    );
+
+                    return (
+                    <div key={member.userId} className="grid grid-cols-12 gap-2 px-3 py-2.5 text-xs items-center">
+                      <span className="col-span-5 min-w-0 truncate font-semibold text-slate-800">{member.email}</span>
+                      <div className="col-span-4">
+                        {canManageThisMember ? (
+                          <select
+                            value={member.role}
+                            onChange={(event) => void handleUpdateMemberRole(member, event.target.value as PlatformRole)}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700 outline-none"
+                          >
+                            {PLATFORM_ROLE_OPTIONS.filter((role) => role.id === member.role || canManagePlatformRole(activeOrg?.role, role.id)).map((role) => (
+                              <option key={role.id} value={role.id}>
+                                {role.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="truncate text-slate-600">{getPlatformRoleConfig(member.role).label}</span>
+                        )}
+                      </div>
+                      <div className="col-span-3 flex items-center justify-end gap-2">
+                        <span className="text-[10px] font-bold text-emerald-700">Active</span>
+                        {canManageThisMember && (
+                          <button
+                            type="button"
+                            onClick={() => void handleRemoveMember(member)}
+                            className="rounded-lg border border-rose-100 bg-white px-2 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-50 cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    );
+                  })
+                )}
               </div>
             </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Staff Roster & Salary Administration Panel */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-150 text-left space-y-4 shadow-xs" id="staff-roster-payroll-planner">
+            <div className="xl:col-span-2 space-y-3">
+              {hasPlatformPermission(activeOrg.role, 'manage_members') ? (
+                <form onSubmit={handleInviteMember} className="rounded-xl border border-slate-150 bg-slate-50 p-3 space-y-2">
+                  <input
+                    type="email"
+                    required
+                    placeholder="member@company.com"
+                    value={inviteEmail}
+                    onChange={(event) => setInviteEmail(event.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <select
+                    value={inviteRole}
+                    onChange={(event) => setInviteRole(event.target.value as OrganizationInvitation['role'])}
+                    className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {PLATFORM_ROLE_OPTIONS.filter((role) => role.id !== 'owner').map((role) => (
+                      <option key={role.id} value={role.id}>
+                        {role.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    className="w-full rounded-lg border-none bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-500 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <UserPlus size={13} /> Invite Member
+                  </button>
+                </form>
+              ) : (
+                <div className="rounded-xl border border-slate-150 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+                  Only owners and admins can invite workspace members.
+                </div>
+              )}
+
+              <div className="rounded-xl border border-slate-150 overflow-hidden">
+                <div className="bg-slate-50 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">Pending Invites</div>
+                <div className="divide-y divide-slate-100">
+                  {invitations.filter((invitation) => invitation.status === 'pending').length === 0 ? (
+                    <div className="px-3 py-3 text-xs text-slate-400">No pending invites.</div>
+                  ) : (
+                    invitations
+                      .filter((invitation) => invitation.status === 'pending')
+                      .map((invitation) => (
+                        <div key={invitation.id} className="px-3 py-2 text-xs">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <span className="block truncate font-semibold text-slate-800">{invitation.email}</span>
+                              <span className="text-[10px] text-slate-400">{getPlatformRoleConfig(invitation.role).label}</span>
+                            </div>
+                            {hasPlatformPermission(activeOrg.role, 'manage_members') && (
+                              <button
+                                type="button"
+                                onClick={() => handleRevokeInvitation(invitation.id)}
+                                className="rounded-lg border border-rose-100 bg-white px-2 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-50 cursor-pointer"
+                              >
+                                Revoke
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+
+              {memberStatus && (
+                <div className={`rounded-xl border px-3 py-2 text-xs font-bold ${memberStatus.success ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
+                  {memberStatus.message}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+      )}
+
+      {activeSettingsTab === 'payroll' && (
+      <div
+        className="bg-white p-5 rounded-b-xl border border-slate-150 text-left space-y-4 shadow-xs"
+        id="settings-panel-payroll"
+        role="tabpanel"
+        aria-labelledby="settings-tab-payroll"
+      >
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3" id="payroll-header">
           <div className="space-y-0.5">
             <h3 className="font-extrabold text-slate-850 text-sm md:text-base flex items-center gap-2">
@@ -1204,232 +1324,9 @@ export default function SettingsManager() {
           </div>
         </form>
       </div>
-
-      {/* Backups */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-150 space-y-5 text-left" id="database-storage-settings">
-        <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-          <div>
-            <h4 className="font-extrabold text-slate-800 text-xs sm:text-sm uppercase tracking-wider flex items-center gap-1.5">
-              <Database size={16} className="text-blue-600" /> Backups
-            </h4>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Export or restore workspace data when moving between devices.
-            </p>
-          </div>
-          <span className="hidden text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full font-mono uppercase tracking-wider shrink-0">
-            {storageType === 'local' ? 'Workspace database' : 'External sync'}
-          </span>
-        </div>
-
-        {/* Storage Segment Picker Tab Button Selector */}
-        <div className="hidden bg-slate-50 p-1 rounded-xl w-full max-w-[420px] border border-slate-150">
-          <button
-            type="button"
-            onClick={() => setStorageType('local')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition cursor-pointer border-none ${
-              storageType === 'local'
-                ? 'bg-white shadow text-slate-800'
-                : 'text-slate-500 hover:text-slate-800 bg-transparent'
-            }`}
-          >
-            <Server size={14} />
-            <span>Workspace Database</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setStorageType('cloud')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition cursor-pointer border-none ${
-              storageType === 'cloud'
-                ? 'bg-white shadow text-slate-800'
-                : 'text-slate-500 hover:text-slate-800 bg-transparent'
-            }`}
-          >
-            <Cloud size={14} />
-            <span>External Sync</span>
-          </button>
-        </div>
-
-        <form onSubmit={handleSaveStorageSettings} className="space-y-5">
-          {true ? (
-            <div className="space-y-4 pt-1">
-              <div className="hidden bg-slate-50 p-4 rounded-xl border border-slate-200/60 max-w-2xl text-[11px] text-slate-600 leading-relaxed space-y-2">
-                <p>
-                  <strong>Workspace database:</strong> Records are loaded from and saved through the application persistence layer.
-                </p>
-                <p>
-                  Export/import is available for controlled workspace backup and restore operations.
-                </p>
-              </div>
-
-              <div className="hidden space-y-1.5 max-w-md">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
-                  Workspace Key Prefix
-                </label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    required
-                    value={localPrefix}
-                    onChange={(e) => setLocalPrefix(e.target.value)}
-                    placeholder="e.g. cc_ or workshop_2026_"
-                    className="flex-1 bg-slate-50 border border-slate-205 rounded-xl p-3 text-xs font-mono font-bold text-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 transition"
-                  />
-                  <div className="text-[10px] flex items-center text-slate-400 font-semibold italic bg-slate-100/50 px-3 py-2 sm:py-0 rounded-xl border">
-                    Namespace <code className="text-slate-700 ml-1.5 font-bold font-mono">{localPrefix}</code>
-                  </div>
-                </div>
-              </div>
-
-              {/* Import Export Actions Suite */}
-              <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-3 text-xs">
-                <div className="space-y-0.5">
-                  <span className="font-bold text-slate-800 text-[11px] block">Backups</span>
-                  <span className="text-[10px] text-slate-450 block">Export or import the workspace ledger as JSON.</span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleExportDB}
-                    className="px-3.5 py-2 hover:bg-slate-50 bg-white border border-slate-200 hover:text-blue-600 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer shrink-0 text-slate-600 text-xs"
-                    title="Download database dump"
-                  >
-                    <FileDown size={13} className="text-slate-500" />
-                    <span>Export JSON</span>
-                  </button>
-
-                  <div className="relative">
-                    <input
-                      type="file"
-                      accept=".json"
-                      onChange={handleImportDB}
-                      id="db-backup-import-picker"
-                      className="hidden"
-                    />
-                    <label
-                      htmlFor="db-backup-import-picker"
-                      className="px-3.5 py-2 hover:bg-slate-50 bg-white border border-slate-205 hover:text-blue-600 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer shrink-0 text-slate-600 text-xs text-center inline-block"
-                    >
-                      <FileUp size={13} className="text-slate-500 inline mr-1" />
-                      <span>Import JSON</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {importStatus && (
-                <div className={`p-3 rounded-xl border text-xs font-bold ${importStatus.success ? 'bg-emerald-5 border-emerald-200 text-emerald-800' : 'bg-rose-5 border-rose-200 text-rose-800'} animate-in fade-in duration-100`}>
-                  {importStatus.message}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-4 pt-1">
-              <div className="bg-blue-50/40 p-4 rounded-xl border border-blue-100 text-[11px] text-blue-800 leading-relaxed space-y-1 max-w-2xl">
-                <p className="font-extrabold flex items-center gap-1">
-                  <Cloud size={12} /> External sync
-                </p>
-                <p>
-                  Connect a REST endpoint only for controlled migration or interoperability workflows.
-                </p>
-                <p className="text-slate-500">
-                  Use upload or download only when you need to move data between workspace persistence and an external endpoint.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
-                    API Endpoint
-                  </label>
-                  <input
-                    type="url"
-                    value={cloudEndpoint}
-                    onChange={(e) => setCloudEndpoint(e.target.value)}
-                    required={storageType === 'cloud'}
-                    placeholder="e.g. https://api.jsonbin.it/v1/vault/my_keys"
-                    className="w-full bg-slate-50 border border-slate-205 rounded-xl p-3 text-xs font-mono text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 transition"
-                  />
-                  <span className="text-[9px] text-slate-400 block mt-1">The API endpoint should accept <code>GET</code> to retrieve and <code>POST</code> with JSON payload to overwrite.</span>
-                </div>
-
-                <div className="space-y-1.5 pb-2">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
-                    Authorization Header
-                  </label>
-                  <input
-                    type="text"
-                    value={cloudAuth}
-                    onChange={(e) => setCloudAuth(e.target.value)}
-                    placeholder="e.g. Bearer my-sec-token-123"
-                    className="w-full bg-slate-50 border border-slate-205 rounded-xl p-3 text-xs font-mono text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 transition"
-                  />
-                  <span className="text-[9px] text-slate-400 block mt-1">Bearer token or apiKey attached to <code>Authorization</code> request headers.</span>
-                </div>
-              </div>
-
-              {/* Sync controls action bar */}
-              <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-                <div className="space-y-0.5">
-                  <span className="font-bold text-slate-800 text-[11px] block">Sync Actions</span>
-                  <span className="text-[10px] text-slate-450 block">Test the connection or move data between workspace persistence and an external endpoint.</span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleTestCloudConnection}
-                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-650 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer border-none text-xs"
-                  >
-                    <RefreshCw size={12} className="animate-spin-slow" />
-                    <span>Test Connection</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handlePushToCloud}
-                    className="px-3.5 py-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer border-none text-xs"
-                    title="Upload workspace data"
-                  >
-                    <UploadCloud size={13} />
-                    <span>Upload Workspace Data</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handlePullFromCloud}
-                    className="px-3.5 py-2 bg-slate-900 hover:bg-slate-850 text-white rounded-xl font-bold transition flex items-center gap-1 cursor-pointer border-none text-xs"
-                    title="Download external data into workspace persistence"
-                  >
-                    <DownloadCloud size={13} />
-                    <span>Download Cloud Data</span>
-                  </button>
-                </div>
-              </div>
-
-              {testStatus && (
-                <div className={`p-3 rounded-xl border text-xs font-bold ${testStatus.success ? 'bg-emerald-5 border-emerald-250 text-emerald-800' : 'bg-rose-5 border-rose-250 text-rose-800'} animate-in fade-in duration-100`}>
-                  {testStatus.message}
-                </div>
-              )}
-
-              {syncStatus && (
-                <div className={`p-3 rounded-xl border text-xs font-bold ${syncStatus.success ? 'bg-emerald-5 border-emerald-250 text-emerald-800' : 'bg-rose-5 border-rose-250 text-rose-800'} animate-in fade-in duration-100`}>
-                  {syncStatus.message}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="hidden pt-4 border-t justify-end gap-3">
-            <button
-              type="submit"
-              className="bg-blue-600 hover:bg-blue-550 text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer border-none shadow-sm"
-            >
-              <Save size={13} />
-              <span>Save Storage Settings</span>
-            </button>
-          </div>
-        </form>
+      )}
       </div>
+
     </div>
   );
 }

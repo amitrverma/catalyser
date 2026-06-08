@@ -21,10 +21,6 @@ const SETTINGS_KEYS = [
   'custom_stamp_sign_storage_path',
   'custom_sign_base64',
   'custom_sign_storage_path',
-  'cc_storage_type',
-  'cc_storage_local_prefix',
-  'cc_storage_cloud_endpoint',
-  'cc_storage_cloud_auth',
   'cc_custom_overheads',
   'cc_tax_rate',
   'cc_gst_rate',
@@ -32,7 +28,6 @@ const SETTINGS_KEYS = [
 ];
 
 const STAFF_SALARIES_KEY = 'cc_staff_salaries';
-const SYNCABLE_KEYS = new Set([...SETTINGS_KEYS, STAFF_SALARIES_KEY]);
 const STORAGE_BUCKET = 'catalyser-documents';
 const MAX_SETTINGS_ASSET_BYTES = 2 * 1024 * 1024;
 const SUPPORTED_SETTINGS_ASSET_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']);
@@ -42,9 +37,6 @@ const ASSET_KEYS = [
   { dataKey: 'custom_stamp_sign_base64', pathKey: 'custom_stamp_sign_storage_path' },
   { dataKey: 'custom_sign_base64', pathKey: 'custom_sign_storage_path' },
 ];
-
-let persistenceInstalled = false;
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function canSync() {
   return Boolean(isSupabaseConfigured && supabase);
@@ -70,7 +62,7 @@ function extensionForContentType(contentType: string) {
   return 'png';
 }
 
-async function uploadDataUrlAsset(userId: string, key: string, dataUrl: string) {
+async function uploadDataUrlAsset(userId: string, orgId: string | null, key: string, dataUrl: string) {
   if (!supabase || !dataUrl.startsWith('data:')) return null;
 
   const response = await fetch(dataUrl);
@@ -85,7 +77,7 @@ async function uploadDataUrlAsset(userId: string, key: string, dataUrl: string) 
   }
 
   const extension = extensionForContentType(blob.type || 'image/png');
-  const path = `${userId}/settings/${key}.${extension}`;
+  const path = orgId ? `${userId}/${orgId}/settings/${key}.${extension}` : `${userId}/settings/${key}.${extension}`;
   const uploadResult = await supabase.storage.from(STORAGE_BUCKET).upload(path, blob, {
     upsert: true,
     contentType,
@@ -124,7 +116,7 @@ async function hydrateAssetUrls(settings: Record<string, unknown>) {
   }
 }
 
-async function migrateLocalAssetsToStorage(userId: string, settings: Record<string, string | null>) {
+async function migrateLocalAssetsToStorage(userId: string, orgId: string | null, settings: Record<string, string | null>) {
   let migrated = false;
   let allAssetsSynced = true;
 
@@ -133,7 +125,7 @@ async function migrateLocalAssetsToStorage(userId: string, settings: Record<stri
     if (!value?.startsWith('data:')) continue;
 
     try {
-      const path = await uploadDataUrlAsset(userId, asset.dataKey, value);
+      const path = await uploadDataUrlAsset(userId, orgId, asset.dataKey, value);
       if (!path) continue;
 
       const signedUrl = await createSignedAssetUrl(path);
@@ -170,9 +162,11 @@ export async function hydrateSettingsFromSupabase() {
   const activeOrg = await ensureActiveOrganization();
   const orgId = activeOrg?.id || null;
 
+  const settingsQuery = supabase.from('company_settings').select('settings');
+  const salariesQuery = supabase.from('staff_salaries').select('salaries');
   const [settingsResult, salariesResult] = await Promise.all([
-    supabase.from('company_settings').select('settings').eq('user_id', user.id).eq('org_id', orgId).maybeSingle(),
-    supabase.from('staff_salaries').select('salaries').eq('user_id', user.id).eq('org_id', orgId).maybeSingle(),
+    orgId ? settingsQuery.eq('org_id', orgId).maybeSingle() : settingsQuery.eq('user_id', user.id).is('org_id', null).maybeSingle(),
+    orgId ? salariesQuery.eq('org_id', orgId).maybeSingle() : salariesQuery.eq('user_id', user.id).is('org_id', null).maybeSingle(),
   ]);
 
   if (settingsResult.error) {
@@ -198,7 +192,6 @@ export async function hydrateSettingsFromSupabase() {
   window.dispatchEvent(new Event('custom-logo-updated'));
   window.dispatchEvent(new Event('custom-stamp-updated'));
   window.dispatchEvent(new Event('custom-sign-updated'));
-  window.dispatchEvent(new Event('custom-settings-updated'));
 }
 
 export async function persistSettingsToSupabase(): Promise<boolean> {
@@ -214,29 +207,43 @@ export async function persistSettingsToSupabase(): Promise<boolean> {
     const orgId = activeOrg?.id || null;
 
     const settings = snapshotSettings(SETTINGS_KEYS);
-    const assetsSynced = await migrateLocalAssetsToStorage(user.id, settings);
+    const assetsSynced = await migrateLocalAssetsToStorage(user.id, orgId, settings);
     if (!assetsSynced) return false;
 
     const salaries = readJsonValue(STAFF_SALARIES_KEY, []);
 
-    const [settingsResult, salariesResult] = await Promise.all([
-      supabase.from('company_settings').upsert(
-        {
-          user_id: user.id,
-          org_id: orgId,
-          settings,
-        },
-        { onConflict: 'user_id,org_id' },
-      ),
-      supabase.from('staff_salaries').upsert(
-        {
-          user_id: user.id,
-          org_id: orgId,
-          salaries,
-        },
-        { onConflict: 'user_id,org_id' },
-      ),
+    const [existingSettingsResult, existingSalariesResult] = await Promise.all([
+      orgId ? supabase.from('company_settings').select('org_id').eq('org_id', orgId).maybeSingle() : Promise.resolve(null),
+      orgId ? supabase.from('staff_salaries').select('org_id').eq('org_id', orgId).maybeSingle() : Promise.resolve(null),
     ]);
+
+    const settingsOperation = orgId
+      ? existingSettingsResult?.data
+        ? supabase.from('company_settings').update({ settings }).eq('org_id', orgId)
+        : supabase.from('company_settings').insert({ user_id: user.id, org_id: orgId, settings })
+      : supabase.from('company_settings').upsert(
+          {
+            user_id: user.id,
+            org_id: null,
+            settings,
+          },
+          { onConflict: 'user_id,org_id' },
+        );
+
+    const salariesOperation = orgId
+      ? existingSalariesResult?.data
+        ? supabase.from('staff_salaries').update({ salaries }).eq('org_id', orgId)
+        : supabase.from('staff_salaries').insert({ user_id: user.id, org_id: orgId, salaries })
+      : supabase.from('staff_salaries').upsert(
+          {
+            user_id: user.id,
+            org_id: null,
+            salaries,
+          },
+          { onConflict: 'user_id,org_id' },
+        );
+
+    const [settingsResult, salariesResult] = await Promise.all([settingsOperation, salariesOperation]);
 
     if (settingsResult.error) {
       console.error('Supabase settings save failed:', settingsResult.error);
@@ -250,19 +257,4 @@ export async function persistSettingsToSupabase(): Promise<boolean> {
     console.error('Supabase settings save failed:', error);
     return false;
   }
-}
-
-export function scheduleSettingsPersist() {
-  if (!canSync()) return;
-  if (saveTimer) clearTimeout(saveTimer);
-
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    void persistSettingsToSupabase();
-  }, 500);
-}
-
-export function installSettingsPersistence() {
-  if (persistenceInstalled || typeof window === 'undefined') return;
-  persistenceInstalled = true;
 }

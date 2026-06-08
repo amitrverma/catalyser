@@ -7,8 +7,8 @@ import { UploadCloud, File, FileText, Check, AlertCircle, RefreshCcw, Download, 
 interface DocumentManagerProps {
   projectId: string;
   documents: CloudDocument[];
-  onAddDocument: (file: File, category: DocumentCategory) => void;
-  onDeleteDocument: (docId: string) => void;
+  onAddDocument?: (file: File, category: DocumentCategory) => void;
+  onDeleteDocument?: (docId: string) => void;
   onDownloadDocument: (doc: CloudDocument) => void;
 }
 
@@ -63,6 +63,7 @@ export default function DocumentManager({
   };
 
   const uploadFile = (file: File) => {
+    if (!onAddDocument) return;
     const error = validateWorkspaceDocumentFile(file);
     if (error) {
       setUploadError(error);
@@ -101,6 +102,7 @@ export default function DocumentManager({
     <div className="space-y-6" id="document-manager-component">
       {/* Upload Zone */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {onAddDocument && (
         <div className="lg:col-span-1 space-y-4 text-left">
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-3">
             <h4 className="text-xs font-bold text-slate-550 uppercase tracking-wider">
@@ -161,9 +163,10 @@ export default function DocumentManager({
             </span>
           </div>
         </div>
+        )}
 
         {/* Sync List */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-150 p-5 space-y-4">
+        <div className={`${onAddDocument ? 'lg:col-span-2' : 'lg:col-span-3'} bg-white rounded-xl border border-slate-150 p-5 space-y-4`}>
           <div className="flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center border-b border-slate-100 pb-3 text-left">
             <div>
               <h3 className="font-bold text-slate-800 text-sm">Documents</h3>
@@ -245,13 +248,15 @@ export default function DocumentManager({
                       >
                         <Download size={13} />
                       </button>
-                      <button
-                        onClick={() => onDeleteDocument(doc.id)}
-                        className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer"
-                        title="Purge backup"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      {onDeleteDocument && (
+                        <button
+                          onClick={() => onDeleteDocument(doc.id)}
+                          className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer"
+                          title="Delete document"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

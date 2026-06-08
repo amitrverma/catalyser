@@ -11,21 +11,24 @@
 import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Project, Payment, Contact, CloudDocument, ProjectStatus, PaymentType, DocumentCategory, DbData, ContactRole } from './types';
 import {
-  cacheDbData,
   deleteContact,
   deleteDocument,
   deletePayment,
+  getLastPersistenceError,
+  insertContact,
+  insertProject,
   loadDbData,
   persistContact,
   persistDocument,
   persistPayment,
   persistProject,
-  saveDbData,
 } from './lib/db';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
-import { hydrateSettingsFromSupabase, installSettingsPersistence, persistSettingsToSupabase } from './lib/settingsSync';
+import { hydrateSettingsFromSupabase } from './lib/settingsSync';
 import { createWorkspaceFileUrl, uploadPaymentBillDataUrl, uploadWorkspaceFile, validateWorkspaceDocumentFile } from './lib/fileStorage';
-import { ensureActiveOrganization, type ActiveOrganization } from './lib/orgs';
+import { acceptPendingOrganizationInvitations, createOrganization, ensureActiveOrganization, listUserOrganizations, selectActiveOrganization, type ActiveOrganization } from './lib/orgs';
+import { listCurrentUserProjectIds } from './lib/projectAssignments';
+import { getPlatformRoleConfig, hasPlatformPermission } from './lib/platformRoles';
 import Logo from './components/Logo';
 import {
   LayoutDashboard,
@@ -85,9 +88,14 @@ export default function App() {
   const [dbLoadWarning, setDbLoadWarning] = useState<string | null>(null);
   const [appNotice, setAppNotice] = useState<{ title: string; message: string } | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<ActiveOrganization | null>(null);
+  const [availableWorkspaces, setAvailableWorkspaces] = useState<ActiveOrganization[]>([]);
+  const [needsWorkspaceOnboarding, setNeedsWorkspaceOnboarding] = useState(false);
+  const [organizationName, setOrganizationName] = useState('');
+  const [organizationCreateError, setOrganizationCreateError] = useState('');
+  const [organizationCreating, setOrganizationCreating] = useState(false);
+  const [assignedProjectIds, setAssignedProjectIds] = useState<string[]>([]);
   const [accountLabel, setAccountLabel] = useState(isSupabaseConfigured ? 'Cloud account' : 'Local workspace');
   const pendingSaveRef = useRef<Promise<boolean>>(Promise.resolve(true));
-  const pendingSettingsSaveRef = useRef<Promise<boolean>>(Promise.resolve(true));
 
   // View state controllers
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => routeFromPath(window.location.pathname).selectedProjectId);
@@ -105,44 +113,54 @@ export default function App() {
   // Standalone mode detection for multi-tab party ledgers
   const [standalonePartyName, setStandalonePartyName] = useState<string | null>(null);
 
-  const persistSettingsTracked = () => {
-    const savePromise = persistSettingsToSupabase();
-    pendingSettingsSaveRef.current = savePromise;
-    return savePromise;
+  const reloadWorkspaceData = async () => {
+    await acceptPendingOrganizationInvitations();
+    const workspace = await ensureActiveOrganization();
+    const workspaces = await listUserOrganizations();
+    if (isSupabaseConfigured && supabase) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setAccountLabel(user?.email || 'Cloud account');
+      if (user && !workspace) {
+        setActiveWorkspace(null);
+        setAvailableWorkspaces([]);
+        setAssignedProjectIds([]);
+        setNeedsWorkspaceOnboarding(true);
+        setDb({ projects: [], payments: [], contacts: [], documents: [] });
+        setDbLoadWarning(null);
+        return;
+      }
+    } else {
+      setAccountLabel('Local workspace');
+    }
+
+    setNeedsWorkspaceOnboarding(false);
+    await hydrateSettingsFromSupabase();
+    const nextAssignedProjectIds = workspace?.role === 'staff' ? await listCurrentUserProjectIds() : [];
+    const result = await loadDbData();
+    setActiveWorkspace(workspace);
+    setAvailableWorkspaces(workspaces);
+    setAssignedProjectIds(nextAssignedProjectIds);
+    setDb(result.data);
+    setDbLoadWarning(
+      result.source === 'error'
+        ? 'Cloud data could not be loaded from Supabase. Retry after checking the connection and database policies.'
+        : null,
+    );
   };
 
   // Initialize data on mount
   useEffect(() => {
     let mounted = true;
 
-    installSettingsPersistence();
-
     const loadWorkspace = async () => {
-      await hydrateSettingsFromSupabase();
-      const workspace = await ensureActiveOrganization();
-      const settingsSynced = await persistSettingsTracked();
-      const result = await loadDbData();
-      if (isSupabaseConfigured && supabase) {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        setAccountLabel(user?.email || 'Cloud account');
-      } else {
-        setAccountLabel('Local workspace');
-      }
-      if (!mounted) return;
-      setActiveWorkspace(workspace);
-      setDb(result.data);
-      setDbLoadWarning(
-        !settingsSynced
-          ? 'Settings could not be synced to the cloud. Retry before signing out from this device.'
-          : result.source === 'fallback'
-          ? 'Cloud data could not be loaded. Showing local fallback data until sync is restored.'
-          : null,
-      );
+      await reloadWorkspaceData();
     };
 
-    void loadWorkspace();
+    void loadWorkspace().then(() => {
+      if (!mounted) return;
+    });
 
     // Synchronize url params
     const params = new URLSearchParams(window.location.search);
@@ -160,20 +178,18 @@ export default function App() {
       const result = await loadDbData();
       setDb(result.data);
       setDbLoadWarning(
-        result.source === 'fallback'
-          ? 'Cloud data could not be loaded. Showing local fallback data until sync is restored.'
+        result.source === 'error'
+          ? 'Cloud data could not be loaded from Supabase. Retry after checking the connection and database policies.'
           : null,
       );
     };
     const handleSettingsSync = async () => {
-      const settingsSynced = await persistSettingsTracked();
+      await hydrateSettingsFromSupabase();
       const result = await loadDbData();
       setDb(result.data);
       setDbLoadWarning(
-        !settingsSynced
-          ? 'Settings could not be synced to the cloud. Retry before signing out from this device.'
-          : result.source === 'fallback'
-          ? 'Cloud data could not be loaded. Showing local fallback data until sync is restored.'
+        result.source === 'error'
+          ? 'Cloud data could not be loaded from Supabase. Retry after checking the connection and database policies.'
           : null,
       );
     };
@@ -190,12 +206,28 @@ export default function App() {
   }, []);
 
   // Sync state helpers
-  const commitState = (updatedDb: typeof db, persistPromise: Promise<boolean>): Promise<boolean> => {
+  const commitState = async (updatedDb: typeof db, persistPromise: Promise<boolean>): Promise<boolean> => {
     if (!updatedDb) return Promise.resolve(false);
-    setDb(updatedDb);
-    cacheDbData(updatedDb);
     pendingSaveRef.current = persistPromise;
-    return persistPromise;
+    const persisted = await persistPromise;
+    if (!persisted) {
+      const persistenceError = getLastPersistenceError();
+      setAppNotice({
+        title: 'Save Failed',
+        message: persistenceError
+          ? `Supabase rejected the change. Nothing was saved. ${persistenceError}`
+          : 'Supabase rejected the change. Nothing was saved. Check your access, connection, or database policies and try again.',
+      });
+      return false;
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+      setDb(updatedDb);
+      return true;
+    }
+
+    await reloadWorkspaceData();
+    return true;
   };
 
   const syncPaymentBillPhoto = async (payment: Payment) => {
@@ -215,17 +247,20 @@ export default function App() {
               }
             : item,
         );
-        const updatedDb = { ...currentDb, payments: updatedPayments };
-        cacheDbData(updatedDb);
         const persistedPayment = updatedPayments.find((item) => item.id === payment.id);
         if (persistedPayment) {
           pendingSaveRef.current = persistPayment({
             ...persistedPayment,
             billPhoto: undefined,
             billPhotoStoragePath: storagePath,
+          }).then(async (saved) => {
+            if (saved) {
+              await reloadWorkspaceData();
+            }
+            return saved;
           });
         }
-        return updatedDb;
+        return { ...currentDb, payments: updatedPayments };
       });
     } catch (error) {
       console.error('Bill photo upload failed:', error);
@@ -248,7 +283,20 @@ export default function App() {
   }
 
   // Active Selected Project object
-  const activeProject = db.projects.find((p) => p.id === selectedProjectId);
+  const isStaffScoped = activeWorkspace?.role === 'staff';
+  const visibleProjectIdSet = new Set(isStaffScoped ? assignedProjectIds : db.projects.map((project) => project.id));
+  const visibleProjects = db.projects.filter((project) => visibleProjectIdSet.has(project.id));
+  const visiblePayments = db.payments.filter((payment) => visibleProjectIdSet.has(payment.projectId));
+  const visibleDocuments = db.documents.filter((document) => visibleProjectIdSet.has(document.projectId));
+  const visibleContactNames = new Set([
+    ...visibleProjects.map((project) => project.clientName.trim().toLowerCase()),
+    ...visiblePayments.map((payment) => payment.party.trim().toLowerCase()),
+  ]);
+  const visibleContacts = isStaffScoped
+    ? db.contacts.filter((contact) => visibleContactNames.has(contact.name.trim().toLowerCase()))
+    : db.contacts;
+
+  const activeProject = visibleProjects.find((p) => p.id === selectedProjectId);
 
   // ----------------------------------------------------
   // Action Handlers
@@ -287,7 +335,14 @@ export default function App() {
       projects: [newProj, ...db.projects],
       contacts: [newClientContact, ...db.contacts],
     };
-    void commitState(updated, Promise.all([persistProject(newProj), persistContact(newClientContact)]).then((results) => results.every(Boolean)));
+    void commitState(
+      updated,
+      insertProject(newProj).then(async (projectSaved) => {
+        if (!projectSaved) return false;
+        await insertContact(newClientContact);
+        return true;
+      }),
+    );
   };
 
   const handleUpdateStatus = (projectId: string, status: ProjectStatus) => {
@@ -406,15 +461,12 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
-    const [recordsSynced, settingsSynced] = await Promise.all([
-      pendingSaveRef.current,
-      pendingSettingsSaveRef.current,
-    ]);
+    const recordsSynced = await pendingSaveRef.current;
 
-    if (!recordsSynced || !settingsSynced) {
+    if (!recordsSynced) {
       setAppNotice({
         title: 'Sync Pending',
-        message: 'Your latest changes have not synced to the cloud yet. Retry sync before signing out.',
+        message: 'Some recent workspace changes could not be updated in Supabase. Try again before signing out.',
       });
       return;
     }
@@ -425,18 +477,15 @@ export default function App() {
 
   const handleRetryCloudLoad = async () => {
     const workspace = await ensureActiveOrganization();
-    const settingsSynced = await persistSettingsTracked();
     const result = await loadDbData();
     setActiveWorkspace(workspace);
     setDb(result.data);
     setDbLoadWarning(
-      !settingsSynced
-        ? 'Settings could not be synced to the cloud. Retry before signing out from this device.'
-        : result.source === 'fallback'
-        ? 'Cloud data could not be loaded. Showing local fallback data until sync is restored.'
+      result.source === 'error'
+        ? 'Cloud data could not be loaded from Supabase. Retry after checking the connection and database policies.'
         : null,
     );
-    if (settingsSynced && result.source !== 'fallback') {
+    if (result.source !== 'error') {
       setAppNotice(null);
     }
   };
@@ -564,14 +613,17 @@ export default function App() {
               }
             : document,
         );
-        const finishedDb = { ...currentDb, documents: updatedDocs };
-        cacheDbData(finishedDb);
         const finishedDocument = updatedDocs.find((document) => document.id === docId);
         if (finishedDocument) {
-          const savePromise = persistDocument(finishedDocument);
+          const savePromise = persistDocument(finishedDocument).then(async (saved) => {
+            if (saved) {
+              await reloadWorkspaceData();
+            }
+            return saved;
+          });
           pendingSaveRef.current = savePromise;
         }
-        return finishedDb;
+        return { ...currentDb, documents: updatedDocs };
       });
     })().catch((error) => {
       console.error('Document upload failed:', error);
@@ -583,7 +635,6 @@ export default function App() {
             document.id === docId ? { ...document, syncStatus: 'failed' as const } : document,
           ),
         };
-        cacheDbData(finishedDb);
         const failedDocument = finishedDb.documents.find((document) => document.id === docId);
         if (failedDocument) {
           const savePromise = persistDocument(failedDocument);
@@ -638,15 +689,23 @@ export default function App() {
     );
   }
 
+  const workspaceName = activeWorkspace?.name || (isSupabaseConfigured ? 'Personal Workspace' : 'Local Workspace');
+  const workspaceModeLabel = isSupabaseConfigured && supabase ? 'Cloud workspace' : 'Local workspace';
+  const workspaceRoleLabel = activeWorkspace ? getPlatformRoleConfig(activeWorkspace.role).label : 'Solo';
+  const activeRole = activeWorkspace?.role || (isSupabaseConfigured ? null : 'owner');
+  const canManageProjects = hasPlatformPermission(activeRole, 'manage_projects');
+  const canManageContacts = hasPlatformPermission(activeRole, 'manage_contacts');
+  const canManageLedger = hasPlatformPermission(activeRole, 'manage_ledger');
+  const canManageDocuments = hasPlatformPermission(activeRole, 'manage_documents');
+  const canManageSettings = hasPlatformPermission(activeRole, 'manage_settings');
+  const canViewReports = hasPlatformPermission(activeRole, 'view_reports') || !isSupabaseConfigured;
   const navItems = [
     { id: 'projects' as const, label: 'Projects', icon: FolderKanban },
     { id: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'contacts' as const, label: 'Contacts', icon: Users },
-    { id: 'reports' as const, label: 'Reports', icon: FileSpreadsheet },
-    { id: 'settings' as const, label: 'Settings', icon: Settings },
+    ...(canViewReports ? [{ id: 'reports' as const, label: 'Reports', icon: FileSpreadsheet }] : []),
+    ...(canManageSettings ? [{ id: 'settings' as const, label: 'Settings', icon: Settings }] : []),
   ];
-  const workspaceName = activeWorkspace?.name || (isSupabaseConfigured ? 'Personal Workspace' : 'Local Workspace');
-  const workspaceModeLabel = isSupabaseConfigured && supabase ? 'Cloud workspace' : 'Local workspace';
 
   const pageTitle = activeProject
     ? activeProject.name
@@ -657,7 +716,7 @@ export default function App() {
   const normalizedSearch = globalSearch.trim().toLowerCase();
   const searchMatches = normalizedSearch
     ? [
-        ...db.projects
+        ...visibleProjects
           .filter((project) =>
             [project.name, project.clientName, project.address, project.description].some((value) =>
               (value || '').toLowerCase().includes(normalizedSearch),
@@ -671,7 +730,7 @@ export default function App() {
             subtitle: project.clientName,
             onClick: () => navigateToProject(project.id),
           })),
-        ...db.contacts
+        ...visibleContacts
           .filter((contact) =>
             [contact.name, contact.company, contact.email, contact.phone].some((value) =>
               (value || '').toLowerCase().includes(normalizedSearch),
@@ -685,7 +744,7 @@ export default function App() {
             subtitle: contact.company || contact.role,
             onClick: () => navigateToTab('contacts'),
           })),
-        ...db.documents
+        ...visibleDocuments
           .filter((document) => document.name.toLowerCase().includes(normalizedSearch))
           .slice(0, 4)
           .map((document) => ({
@@ -716,6 +775,99 @@ export default function App() {
     setHomeTab('projects');
   };
 
+  const handleWorkspaceSwitch = async (orgId: string) => {
+    if (!orgId || orgId === activeWorkspace?.id) return;
+    selectActiveOrganization(orgId);
+    setSelectedProjectId(null);
+    setHomeTab('projects');
+    if (window.location.pathname !== '/projects') {
+      window.history.pushState({}, '', '/projects');
+    }
+    await reloadWorkspaceData();
+  };
+
+  const handleCreateOrganization = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const name = organizationName.trim();
+    if (!name) {
+      setOrganizationCreateError('Organization name is required.');
+      return;
+    }
+
+    setOrganizationCreating(true);
+    setOrganizationCreateError('');
+    const organization = await createOrganization(name);
+    if (!organization) {
+      setOrganizationCreateError('Could not create organization. Please retry.');
+      setOrganizationCreating(false);
+      return;
+    }
+
+    selectActiveOrganization(organization.id);
+    setOrganizationName('');
+    setNeedsWorkspaceOnboarding(false);
+    await reloadWorkspaceData();
+    setOrganizationCreating(false);
+  };
+
+  if (needsWorkspaceOnboarding && isSupabaseConfigured) {
+    return (
+      <div className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900">
+        <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-xl items-center">
+          <div className="w-full rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-slate-950 text-white">
+                  <Building2 size={18} />
+                </div>
+                <h1 className="text-lg font-black text-slate-950">Create organization</h1>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  No workspace is linked to {accountLabel}. Create the organization that will own projects,
+                  contacts, ledgers, settings, and team access.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleSignOut()}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer"
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <LogOut size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateOrganization} className="space-y-3">
+              <label className="block text-xs font-bold text-slate-600">
+                Organization Name
+                <input
+                  type="text"
+                  required
+                  value={organizationName}
+                  onChange={(event) => setOrganizationName(event.target.value)}
+                  placeholder="e.g. Catalyser Design"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-900 outline-none focus:border-blue-500"
+                />
+              </label>
+              {organizationCreateError && (
+                <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                  {organizationCreateError}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={organizationCreating}
+                className="w-full rounded-lg bg-blue-700 px-3 py-2.5 text-sm font-black text-white hover:bg-blue-800 disabled:opacity-60"
+              >
+                {organizationCreating ? 'Creating...' : 'Create Organization'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 font-sans text-slate-900" id="app-viewport">
       <div className="flex min-h-screen">
@@ -726,7 +878,21 @@ export default function App() {
                 <Building2 size={14} className="shrink-0 text-slate-400" />
                 <span className="truncate font-semibold">{workspaceName}</span>
               </div>
-              <span className="mt-1 block truncate pl-5 text-[10px] font-semibold text-slate-500">{workspaceModeLabel}</span>
+              {availableWorkspaces.length > 1 && activeWorkspace && (
+                <select
+                  value={activeWorkspace.id}
+                  onChange={(event) => void handleWorkspaceSwitch(event.target.value)}
+                  className="mt-2 w-full rounded-md border border-white/10 bg-slate-900 px-2 py-1 text-[10px] font-bold text-slate-200 outline-none"
+                  aria-label="Switch workspace"
+                >
+                  {availableWorkspaces.map((workspace) => (
+                    <option key={workspace.id} value={workspace.id}>
+                      {workspace.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <span className="mt-1 block truncate pl-5 text-[10px] font-semibold text-slate-500">{workspaceModeLabel} / {workspaceRoleLabel}</span>
             </div>
           </div>
 
@@ -768,8 +934,22 @@ export default function App() {
                 </button>
                 <div className="hidden min-w-0 border-l border-slate-200 pl-3 text-left md:block">
                   <span className="block truncate text-xs font-bold text-slate-800">{workspaceName}</span>
-                  <span className="block truncate text-[10px] font-semibold text-slate-400">{workspaceModeLabel}</span>
+                  <span className="block truncate text-[10px] font-semibold text-slate-400">{workspaceModeLabel} / {workspaceRoleLabel}</span>
                 </div>
+                {availableWorkspaces.length > 1 && activeWorkspace && (
+                  <select
+                    value={activeWorkspace.id}
+                    onChange={(event) => void handleWorkspaceSwitch(event.target.value)}
+                    className="hidden max-w-44 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-700 outline-none md:block"
+                    aria-label="Switch workspace"
+                  >
+                    {availableWorkspaces.map((workspace) => (
+                      <option key={workspace.id} value={workspace.id}>
+                        {workspace.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div className="flex items-center gap-2 md:gap-3">
@@ -821,12 +1001,13 @@ export default function App() {
                       <span className="truncate">{accountLabel}</span>
                     </div>
                     <button
+                      type="button"
                       onClick={() => void handleSignOut()}
-                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
+                      aria-label="Sign out"
                       title="Sign out"
                     >
-                      <LogOut size={15} />
-                      <span className="hidden sm:inline">Sign out</span>
+                      <LogOut size={16} />
                     </button>
                   </div>
                 ) : (
@@ -850,7 +1031,7 @@ export default function App() {
                 onClick={() => void handleRetryCloudLoad()}
                 className="self-start rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100 cursor-pointer sm:self-auto"
               >
-                Retry sync
+                Try again
               </button>
             </div>
           </div>
@@ -880,20 +1061,20 @@ export default function App() {
           /* SINGLE PROJECT INDEPTH LEDGER, BILLING, AND DOCUMENTS VIEW */
           <ProjectDetail
             project={activeProject}
-            projects={db.projects}
-            payments={db.payments}
-            contacts={db.contacts}
-            documents={db.documents}
+            projects={visibleProjects}
+            payments={visiblePayments}
+            contacts={visibleContacts}
+            documents={visibleDocuments}
             onBack={() => navigateToTab('projects')}
-            onAddPayment={handleAddPayment}
-            onDeletePayment={handleDeletePayment}
-            onEditPayment={handleEditPayment}
-            onAddContact={handleAddContact}
-            onAddContacts={handleAddContacts}
-            onUpdateContact={handleUpdateContact}
-            onUpdateContactRole={handleUpdateContactRole}
-            onAddDocument={handleAddDocument}
-            onDeleteDocument={handleDeleteDocument}
+            onAddPayment={canManageLedger ? handleAddPayment : undefined}
+            onDeletePayment={canManageLedger ? handleDeletePayment : undefined}
+            onEditPayment={canManageLedger ? handleEditPayment : undefined}
+            onAddContact={canManageContacts ? handleAddContact : undefined}
+            onAddContacts={canManageContacts ? handleAddContacts : undefined}
+            onUpdateContact={canManageContacts ? handleUpdateContact : undefined}
+            onUpdateContactRole={canManageContacts ? handleUpdateContactRole : undefined}
+            onAddDocument={canManageDocuments ? handleAddDocument : undefined}
+            onDeleteDocument={canManageDocuments ? handleDeleteDocument : undefined}
             onDownloadDocument={handleDownloadDocument}
           />
         ) : (
@@ -911,10 +1092,10 @@ export default function App() {
                     </p>
                   </div>
                   <ProjectList
-                    projects={db.projects}
-                    payments={db.payments}
-                    onAddProject={handleAddProject}
-                    onUpdateStatus={handleUpdateStatus}
+                    projects={visibleProjects}
+                    payments={visiblePayments}
+                    onAddProject={canManageProjects ? handleAddProject : undefined}
+                    onUpdateStatus={canManageProjects ? handleUpdateStatus : undefined}
                     onSelectProject={navigateToProject}
                   />
                 </div>
@@ -922,11 +1103,12 @@ export default function App() {
 
               {homeTab === 'dashboard' && (
                 <Dashboard
-                  projects={db.projects}
-                  payments={db.payments}
-                  contacts={db.contacts}
-                  documents={db.documents}
+                  projects={visibleProjects}
+                  payments={visiblePayments}
+                  contacts={visibleContacts}
+                  documents={visibleDocuments}
                   onSelectProject={navigateToProject}
+                  canManageSettings={canManageSettings}
                 />
               )}
 
@@ -937,38 +1119,45 @@ export default function App() {
                     <p className="text-slate-200 text-xs">Clients, vendors, suppliers, contractors, site workers, and other contacts.</p>
                   </div>
                   <ContactManager
-                    contacts={db.contacts}
-                    onAddContact={handleAddContact}
-                    onDeleteContact={handleDeleteContact}
-                    onAddContacts={handleAddContacts}
-                    onUpdateContact={handleUpdateContact}
-                    onUpdateContactRole={handleUpdateContactRole}
-                    payments={db.payments}
-                    projects={db.projects}
+                    contacts={visibleContacts}
+                    onAddContact={canManageContacts ? handleAddContact : undefined}
+                    onDeleteContact={canManageContacts ? handleDeleteContact : undefined}
+                    onAddContacts={canManageContacts ? handleAddContacts : undefined}
+                    onUpdateContact={canManageContacts ? handleUpdateContact : undefined}
+                    onUpdateContactRole={canManageContacts ? handleUpdateContactRole : undefined}
+                    payments={visiblePayments}
+                    projects={visibleProjects}
                   />
                 </div>
               )}
 
-              {homeTab === 'reports' && (
+              {homeTab === 'reports' && canViewReports && (
                 <div className="space-y-4">
                   <div className="bg-slate-950 text-white p-6 rounded-2xl shadow-md text-left">
                     <h2 className="text-2xl font-bold tracking-tight">Reports</h2>
                     <p className="text-slate-200 text-sm mt-1">Generate financial statements by project, client, vendor, or fiscal period.</p>
                   </div>
                   <ReportGenerator
-                    projects={db.projects}
-                    payments={db.payments}
+                    projects={visibleProjects}
+                    payments={visiblePayments}
                   />
                 </div>
               )}
 
-              {homeTab === 'settings' && (
+              {homeTab === 'settings' && canManageSettings && (
                 <div className="space-y-4">
                   <div className="bg-slate-950 text-white p-6 rounded-2xl shadow-md text-left">
                     <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
-                    <p className="text-slate-200 text-sm mt-1">Configure company details, billing assets, staff, and backups.</p>
+                    <p className="text-slate-200 text-sm mt-1">Configure company details, billing assets, staff, and team access.</p>
                   </div>
                   <SettingsManager />
+                </div>
+              )}
+
+              {((homeTab === 'reports' && !canViewReports) || (homeTab === 'settings' && !canManageSettings)) && (
+                <div className="rounded-xl border border-slate-200 bg-white p-6 text-left shadow-xs">
+                  <h3 className="text-sm font-bold text-slate-800">Access restricted</h3>
+                  <p className="mt-1 text-xs text-slate-500">Your workspace role does not include access to this area.</p>
                 </div>
               )}
             </div>

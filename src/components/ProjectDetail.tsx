@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Project, Payment, Contact, CloudDocument, PaymentType, PaymentMode, DocumentCategory, ContactRole, PartyRole } from '../types';
 import { formatCurrency, formatDate } from '../lib/formatter';
 import { createWorkspaceFileUrl, validateBillImageFile } from '../lib/fileStorage';
 import { readContactImportFile } from '../lib/contactImport';
+import { ensureActiveOrganization, listOrganizationMembers, type OrganizationMember } from '../lib/orgs';
+import { listProjectAssignments, replaceProjectAssignments } from '../lib/projectAssignments';
+import { hasPlatformPermission } from '../lib/platformRoles';
 import { PARTY_ROLE_OPTIONS, PAYABLE_CONTACT_ROLES } from '../lib/roleLabels';
 import InvoiceGenerator from './InvoiceGenerator';
 import DocumentManager from './DocumentManager';
@@ -16,15 +19,15 @@ interface ProjectDetailProps {
   contacts: Contact[];
   documents: CloudDocument[];
   onBack: () => void;
-  onAddPayment: (payment: Omit<Payment, 'id'>) => void;
-  onDeletePayment: (paymentId: string) => void;
+  onAddPayment?: (payment: Omit<Payment, 'id'>) => void;
+  onDeletePayment?: (paymentId: string) => void;
   onEditPayment?: (payment: Payment) => void;
-  onAddContact: (name: string, role: ContactRole, phone: string, email: string, company: string, gstNumber?: string, address?: string) => void;
+  onAddContact?: (name: string, role: ContactRole, phone: string, email: string, company: string, gstNumber?: string, address?: string) => void;
   onAddContacts?: (contacts: Array<{ name: string; role: ContactRole; phone: string; email: string; company: string; gstNumber?: string; address?: string }>) => Promise<boolean> | boolean | void;
   onUpdateContact?: (contactId: string, contact: { name: string; role: ContactRole; phone: string; email: string; company: string; gstNumber?: string; address?: string }) => Promise<boolean> | boolean | void;
   onUpdateContactRole?: (contactId: string, role: ContactRole) => void;
-  onAddDocument: (file: File, category: DocumentCategory) => void;
-  onDeleteDocument: (docId: string) => void;
+  onAddDocument?: (file: File, category: DocumentCategory) => void;
+  onDeleteDocument?: (docId: string) => void;
   onDownloadDocument: (doc: CloudDocument) => void;
 }
 
@@ -79,6 +82,10 @@ export default function ProjectDetail({
   const [selectedPartyLedger, setSelectedPartyLedger] = useState<string | null>(null);
   const [viewingBillPhoto, setViewingBillPhoto] = useState<string | null>(null);
   const [billPhotoError, setBillPhotoError] = useState('');
+  const [workspaceMembers, setWorkspaceMembers] = useState<OrganizationMember[]>([]);
+  const [assignedUserIds, setAssignedUserIds] = useState<string[]>([]);
+  const [assignmentStatus, setAssignmentStatus] = useState('');
+  const [canManageAssignments, setCanManageAssignments] = useState(false);
 
   // Edit payment modal state
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
@@ -121,6 +128,48 @@ export default function ProjectDetail({
       }
       setBillPhotoError('Bill attachment is not available.');
     })();
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAssignments = async () => {
+      const activeOrg = await ensureActiveOrganization();
+      if (!activeOrg || !hasPlatformPermission(activeOrg.role, 'manage_projects')) {
+        if (!cancelled) {
+          setCanManageAssignments(false);
+          setWorkspaceMembers([]);
+          setAssignedUserIds([]);
+        }
+        return;
+      }
+
+      const [members, assignments] = await Promise.all([
+        listOrganizationMembers(activeOrg.id),
+        listProjectAssignments([project.id]),
+      ]);
+
+      if (cancelled) return;
+      setCanManageAssignments(true);
+      setWorkspaceMembers(members.filter((member) => member.role === 'staff'));
+      setAssignedUserIds(assignments.map((assignment) => assignment.userId));
+    };
+
+    void loadAssignments();
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id]);
+
+  const handleToggleProjectAssignment = async (userId: string) => {
+    const nextAssignedUserIds = assignedUserIds.includes(userId)
+      ? assignedUserIds.filter((id) => id !== userId)
+      : [...assignedUserIds, userId];
+
+    setAssignedUserIds(nextAssignedUserIds);
+    setAssignmentStatus('Saving assignments...');
+    const saved = await replaceProjectAssignments(project.id, nextAssignedUserIds);
+    setAssignmentStatus(saved ? 'Assignments saved.' : 'Assignment save failed.');
   };
 
   const resetNewPartyFields = (roleOverride?: ContactRole) => {
@@ -211,6 +260,7 @@ export default function ProjectDetail({
   // Handles adding new payment details
   const handlePaymentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!onAddPayment) return;
     if (!amount || Number(amount) <= 0 || !paymentDate) return;
 
     // Party selection resolution (use picked contact or typed string)
@@ -238,7 +288,7 @@ export default function ProjectDetail({
     if (selectedContact === 'custom' && finalParty) {
       const existingContact = contacts.find((c) => c.name.trim().toLowerCase() === finalParty.toLowerCase());
       derivedRole = newPartyRole;
-      if (!existingContact) {
+      if (!existingContact && onAddContact) {
         onAddContact(
           finalParty,
           newPartyRole,
@@ -348,6 +398,44 @@ export default function ProjectDetail({
         </div>
       </div>
 
+      {canManageAssignments && (
+        <div className="bg-white rounded-xl border border-slate-150 px-3 py-2.5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 text-left">
+          <div className="min-w-0">
+            <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Project Access</span>
+            <span className="block text-xs font-semibold text-slate-700">Assign staff who can view this project workspace.</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {workspaceMembers.length === 0 ? (
+              <span className="rounded-lg border border-slate-150 bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">
+                No staff members in workspace
+              </span>
+            ) : (
+              workspaceMembers.map((member) => {
+                const isAssigned = assignedUserIds.includes(member.userId);
+                return (
+                  <button
+                    key={member.userId}
+                    type="button"
+                    onClick={() => void handleToggleProjectAssignment(member.userId)}
+                    className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition cursor-pointer ${
+                      isAssigned
+                        ? 'border-blue-200 bg-blue-50 text-blue-700'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                    title={member.email}
+                  >
+                    {member.email}
+                  </button>
+                );
+              })
+            )}
+            {assignmentStatus && (
+              <span className="text-[10px] font-bold text-slate-400">{assignmentStatus}</span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Primary Sub-Navigation Tab bar */}
       <div className="border-b border-slate-200">
         <nav className="flex gap-4">
@@ -389,16 +477,18 @@ export default function ProjectDetail({
                 <p className="text-[11px] text-slate-400">Record receipts, expenses, and bill attachments.</p>
               </div>
 
-              <button
-                onClick={() => {
-                  setPaymentDate(getTodayDateInputValue());
-                  setShowAddPayment(true);
-                }}
-                className="bg-blue-600 hover:bg-blue-500 font-bold text-white text-xs px-3.5 py-2 rounded-lg flex items-center gap-1 cursor-pointer transition shadow-xs border-none"
-                id="add-transaction-ledger-btn"
-              >
-                <IndianRupee size={14} /> Add Transaction
-              </button>
+              {onAddPayment && (
+                <button
+                  onClick={() => {
+                    setPaymentDate(getTodayDateInputValue());
+                    setShowAddPayment(true);
+                  }}
+                  className="bg-blue-600 hover:bg-blue-500 font-bold text-white text-xs px-3.5 py-2 rounded-lg flex items-center gap-1 cursor-pointer transition shadow-xs border-none"
+                  id="add-transaction-ledger-btn"
+                >
+                  <IndianRupee size={14} /> Add Transaction
+                </button>
+              )}
             </div>
 
             {/* Daily device date autotaken form modal overlay */}
@@ -773,14 +863,16 @@ export default function ProjectDetail({
                             {p.type === 'in' ? `+${formatCurrency(p.amount)}` : '-'}
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <button
-                              onClick={() => handleBeginEdit(p)}
-                              className="text-blue-600 hover:text-blue-700 font-bold cursor-pointer inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100/80 px-2 py-1 rounded border border-blue-200 transition text-[11px]"
-                              title="Edit transaction log item"
-                            >
-                              <Edit size={11} />
-                              <span>Edit</span>
-                            </button>
+                            {onEditPayment && (
+                              <button
+                                onClick={() => handleBeginEdit(p)}
+                                className="text-blue-600 hover:text-blue-700 font-bold cursor-pointer inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100/80 px-2 py-1 rounded border border-blue-200 transition text-[11px]"
+                                title="Edit transaction log item"
+                              >
+                                <Edit size={11} />
+                                <span>Edit</span>
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -936,18 +1028,20 @@ export default function ProjectDetail({
                                             {p.type === 'in' ? '+' : '-'}{formatCurrency(p.amount)}
                                           </span>
                                         </div>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleBeginEdit(p);
-                                          }}
-                                          className="p-1 px-1.5 hover:bg-slate-100 border border-slate-200 rounded-lg cursor-pointer transition text-[9px] font-semibold text-slate-600 flex items-center gap-0.5 shrink-0"
-                                          title="Edit Transaction"
-                                        >
-                                          <Edit size={9} className="text-blue-600 shrink-0" />
-                                          <span>Edit</span>
-                                        </button>
+                                        {onEditPayment && (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleBeginEdit(p);
+                                            }}
+                                            className="p-1 px-1.5 hover:bg-slate-100 border border-slate-200 rounded-lg cursor-pointer transition text-[9px] font-semibold text-slate-600 flex items-center gap-0.5 shrink-0"
+                                            title="Edit Transaction"
+                                          >
+                                            <Edit size={9} className="text-blue-600 shrink-0" />
+                                            <span>Edit</span>
+                                          </button>
+                                        )}
                                       </div>
                                     </div>
                                   ))
@@ -1171,18 +1265,22 @@ export default function ProjectDetail({
 
               {/* Actions */}
               <div className="flex justify-between items-center pt-3 border-t border-slate-100 gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onDeletePayment(editingPayment.id);
-                    setEditingPayment(null);
-                  }}
-                  className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-xl cursor-pointer transition flex items-center gap-1 border border-rose-200"
-                  title="Remove this transaction log item permanently"
-                >
-                  <Trash2 size={13} />
-                  <span>Delete</span>
-                </button>
+                {onDeletePayment ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDeletePayment(editingPayment.id);
+                      setEditingPayment(null);
+                    }}
+                    className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-xl cursor-pointer transition flex items-center gap-1 border border-rose-200"
+                    title="Remove this transaction log item permanently"
+                  >
+                    <Trash2 size={13} />
+                    <span>Delete</span>
+                  </button>
+                ) : (
+                  <span />
+                )}
 
                 <div className="flex gap-2 font-bold">
                   <button

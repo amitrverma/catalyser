@@ -4,6 +4,7 @@ import { DollarSign, FileText, Percent, ShieldCheck, TrendingUp, TrendingDown, L
 import { formatCompactNumber, formatCurrency } from '../lib/formatter';
 import { DEFAULT_CUSTOM_OVERHEADS, DEFAULT_STAFF_SALARIES, getSetting, readJsonSetting, setSetting } from '../lib/settingsStore';
 import { DEDUCTIBLE_PARTY_ROLES } from '../lib/roleLabels';
+import { persistSettingsToSupabase } from '../lib/settingsSync';
 
 interface DashboardProps {
   projects: Project[];
@@ -11,6 +12,7 @@ interface DashboardProps {
   contacts: Contact[];
   documents: CloudDocument[];
   onSelectProject: (projectId: string) => void;
+  canManageSettings?: boolean;
 }
 
 export default function Dashboard({
@@ -18,7 +20,8 @@ export default function Dashboard({
   payments,
   contacts,
   documents,
-  onSelectProject
+  onSelectProject,
+  canManageSettings = false,
 }: DashboardProps) {
   const [taxRate, setTaxRate] = useState<number>(() => {
     const saved = getSetting('cc_tax_rate');
@@ -58,15 +61,18 @@ export default function Dashboard({
   const [editingLabel, setEditingLabel] = useState('');
   const [editingAmount, setEditingAmount] = useState('');
 
-  const saveCustomOverheads = (newOverheads: Array<{ id: string; label: string; amount: number }>) => {
+  const saveCustomOverheads = async (newOverheads: Array<{ id: string; label: string; amount: number }>) => {
     setCustomOverheads(newOverheads);
     setSetting('cc_custom_overheads', JSON.stringify(newOverheads));
-    window.dispatchEvent(new Event('custom-db-updated'));
-    window.dispatchEvent(new Event('custom-settings-updated'));
+    const saved = await persistSettingsToSupabase();
+    if (!saved) {
+      console.error('Supabase overhead save failed.');
+    }
   };
 
-  const handleAddOverhead = (e: React.FormEvent) => {
+  const handleAddOverhead = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManageSettings) return;
     if (!newLabel.trim() || !newAmount) return;
     const val = parseFloat(newAmount);
     if (isNaN(val) || val <= 0) return;
@@ -77,27 +83,30 @@ export default function Dashboard({
       amount: val
     };
 
-    saveCustomOverheads([...customOverheads, newItem]);
+    await saveCustomOverheads([...customOverheads, newItem]);
     setNewLabel('');
     setNewAmount('');
   };
 
   const handleDeleteOverhead = (id: string) => {
-    saveCustomOverheads(customOverheads.filter(x => x.id !== id));
+    if (!canManageSettings) return;
+    void saveCustomOverheads(customOverheads.filter(x => x.id !== id));
   };
 
   const handleStartEdit = (item: { id: string; label: string; amount: number }) => {
+    if (!canManageSettings) return;
     setEditingId(item.id);
     setEditingLabel(item.label);
     setEditingAmount(item.amount.toString());
   };
 
-  const handleSaveEdit = (id: string) => {
+  const handleSaveEdit = async (id: string) => {
+    if (!canManageSettings) return;
     if (!editingLabel.trim() || !editingAmount) return;
     const val = parseFloat(editingAmount);
     if (isNaN(val) || val <= 0) return;
 
-    saveCustomOverheads(customOverheads.map(x => x.id === id ? { ...x, label: editingLabel.trim(), amount: val } : x));
+    await saveCustomOverheads(customOverheads.map(x => x.id === id ? { ...x, label: editingLabel.trim(), amount: val } : x));
     setEditingId(null);
   };
 
@@ -631,7 +640,7 @@ export default function Dashboard({
                 customOverheads.map((item) => (
                   <tr key={item.id} className="group hover:bg-slate-50/40 animate-in fade-in duration-100">
                     <td className="py-3 pr-2">
-                      {editingId === item.id ? (
+                      {canManageSettings && editingId === item.id ? (
                         <input
                           type="text"
                           value={editingLabel}
@@ -643,7 +652,7 @@ export default function Dashboard({
                       )}
                     </td>
                     <td className="py-3 text-right">
-                      {editingId === item.id ? (
+                      {canManageSettings && editingId === item.id ? (
                         <div className="relative inline-block w-full">
                           <input
                             type="number"
@@ -658,7 +667,7 @@ export default function Dashboard({
                     </td>
                     <td className="py-3 text-center">
                       <div className="flex items-center justify-center gap-1.5">
-                        {editingId === item.id ? (
+                        {canManageSettings && editingId === item.id ? (
                           <>
                             <button
                               onClick={() => handleSaveEdit(item.id)}
@@ -675,7 +684,7 @@ export default function Dashboard({
                               <X size={14} />
                             </button>
                           </>
-                        ) : (
+                        ) : canManageSettings ? (
                           <>
                             <button
                               onClick={() => handleStartEdit(item)}
@@ -692,7 +701,7 @@ export default function Dashboard({
                               <Trash2 size={13} className="text-rose-500" />
                             </button>
                           </>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -703,6 +712,7 @@ export default function Dashboard({
         </div>
 
         {/* Interactive Add Row Inline form */}
+        {canManageSettings && (
         <form onSubmit={handleAddOverhead} className="grid grid-cols-1 md:flex gap-3 pt-2 bg-slate-50 p-4.5 rounded-xl border border-slate-100">
           <div className="flex-1 text-left">
             <label className="text-[9px] uppercase font-bold tracking-wider text-slate-400 block mb-1">
@@ -742,6 +752,7 @@ export default function Dashboard({
             </button>
           </div>
         </form>
+        )}
       </div>
 
       {/* Quick Portfolio Selector card */}

@@ -31,6 +31,18 @@ export interface Payment {
 export type ContactRole = 'client' | 'vendor' | 'supplier' | 'contractor' | 'site_worker' | 'other';
 export type PartyRole = ContactRole;
 
+export type PlatformRole = 'owner' | 'admin' | 'project_manager' | 'accountant' | 'staff' | 'viewer';
+
+export type PlatformPermission =
+  | 'manage_workspace'
+  | 'manage_members'
+  | 'manage_settings'
+  | 'manage_projects'
+  | 'manage_contacts'
+  | 'manage_ledger'
+  | 'manage_documents'
+  | 'view_reports';
+
 export interface Contact {
   id: string;
   name: string;
